@@ -12,13 +12,17 @@ function widthOf(transform: string): number {
   return match ? Number(match[1]) : 0;
 }
 
+// srcset uses commas as separators, and transform URLs contain them (w_320,c_fit,...).
+const encodeUrl = (url: string) => url.replace(/,/g, '%2C');
+
 export function AssetCard({ asset, imageBase, onOpen }: Props) {
   const ordered = [...asset.variants].sort((a, b) => widthOf(a.transform) - widthOf(b.transform));
   const smallest = ordered[0];
-  const src = smallest ? imageBase + smallest.url : '';
+  const src = smallest ? encodeUrl(imageBase + smallest.url) : '';
+  // Only fit variants: ratio crops would change framing between breakpoints.
   const srcSet = ordered
-    .filter((variant) => widthOf(variant.transform) > 0)
-    .map((variant) => imageBase + variant.url + ' ' + widthOf(variant.transform) + 'w')
+    .filter((variant) => variant.transform.includes('c_fit') && widthOf(variant.transform) > 0)
+    .map((variant) => encodeUrl(imageBase + variant.url) + ' ' + widthOf(variant.transform) + 'w')
     .join(', ');
   const dimensions = asset.width && asset.height ? asset.width + ' × ' + asset.height : '—';
   const label =
