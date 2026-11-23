@@ -13,7 +13,13 @@ public static class Imaging
         {
             var cappedWidth = Math.Min(w, sourceWidth);
             var cappedHeight = Math.Min(h, sourceHeight);
-            if (t.C == "fill") return (cappedWidth, cappedHeight);
+
+            if (t.C == "fill")
+            {
+                // Shrink the target box, keeping its ratio, when the source is smaller.
+                var ratio = Math.Min(1d, Math.Min(sourceWidth / (double)w, sourceHeight / (double)h));
+                return (Math.Max(1, (int)Math.Round(w * ratio)), Math.Max(1, (int)Math.Round(h * ratio)));
+            }
 
             var scale = Math.Min(cappedWidth / (double)sourceWidth, cappedHeight / (double)sourceHeight);
             return (Math.Max(1, (int)Math.Round(sourceWidth * scale)), Math.Max(1, (int)Math.Round(sourceHeight * scale)));

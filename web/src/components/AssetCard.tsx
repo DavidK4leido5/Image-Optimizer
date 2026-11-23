@@ -7,8 +7,19 @@ type Props = {
   onOpen: (asset: Asset) => void;
 };
 
+function widthOf(transform: string): number {
+  const match = /w_(\d+)/.exec(transform);
+  return match ? Number(match[1]) : 0;
+}
+
 export function AssetCard({ asset, imageBase, onOpen }: Props) {
-  const preview = asset.variants[0];
+  const ordered = [...asset.variants].sort((a, b) => widthOf(a.transform) - widthOf(b.transform));
+  const smallest = ordered[0];
+  const src = smallest ? imageBase + smallest.url : '';
+  const srcSet = ordered
+    .filter((variant) => widthOf(variant.transform) > 0)
+    .map((variant) => imageBase + variant.url + ' ' + widthOf(variant.transform) + 'w')
+    .join(', ');
   const dimensions = asset.width && asset.height ? asset.width + ' × ' + asset.height : '—';
   const label =
     'Open ' + asset.publicId + ', ' + asset.status + ', ' + dimensions + ', ' + formatBytes(asset.bytes);
@@ -16,9 +27,11 @@ export function AssetCard({ asset, imageBase, onOpen }: Props) {
   return (
     <article className="asset-card">
       <div className="asset-card__media">
-        {preview ? (
+        {smallest ? (
           <img
-            src={imageBase + preview.url}
+            src={src}
+            srcSet={srcSet || undefined}
+            sizes="(max-width: 520px) 45vw, 280px"
             alt=""
             loading="lazy"
             decoding="async"
@@ -26,7 +39,9 @@ export function AssetCard({ asset, imageBase, onOpen }: Props) {
               const image = event.currentTarget;
               if (image.dataset.retried) return;
               image.dataset.retried = '1';
-              image.src = image.src.split('?')[0] + '?r=' + Date.now();
+              image.removeAttribute('srcset');
+              image.removeAttribute('sizes');
+              image.src = src.split('?')[0] + '?r=' + Date.now();
             }}
           />
         ) : (

@@ -4,6 +4,8 @@ using SkiaSharp;
 namespace Processor;
 
 /// <summary>Claims one job at a time. Sequential on purpose: 512MB on the free tier.</summary>
+sealed record VariantRow(string Transform, string Key, int Width, int Height, long Bytes, string Format);
+
 public sealed class TransformWorker(
     Db db, BlobStore store, WakeSignal signal, ILogger<TransformWorker> log) : BackgroundService
 {
@@ -116,25 +118,40 @@ public sealed class TransformWorker(
                 : Imaging.Orient(decoded, codec.EncodedOrigin);
             var image = rotated ?? decoded;
 
+            // Encode the next variant while the previous upload is in flight, then write all rows once.
+            var uploads = new List<Task>();
+            var rows = new List<VariantRow>();
+
             foreach (var transform in transforms)
             {
                 var (variantWidth, variantHeight) = Imaging.TargetSize(image.Width, image.Height, transform);
                 var bytes = Imaging.Render(image, transform);
                 var key = $"v1/{job.AssetId:N}/{transform.Hash}.{transform.Extension}";
 
-                await store.Put(key, bytes, transform.ContentType, "public, max-age=31536000, immutable");
-
-                await Sql.Exec(db.Source, """
-                    insert into variants (asset_id, transform, object_key, width, height, bytes, format)
-                    values (@id, @transform, @key, @width, @height, @bytes, @format)
-                    on conflict (asset_id, transform) do update
-                    set object_key = excluded.object_key, width = excluded.width, height = excluded.height,
-                        bytes = excluded.bytes, format = excluded.format
-                    """, ct,
-                    ("id", job.AssetId), ("transform", transform.Canonical), ("key", key),
-                    ("width", variantWidth), ("height", variantHeight),
-                    ("bytes", bytes.LongLength), ("format", transform.F));
+                rows.Add(new VariantRow(
+                    transform.Canonical, key, variantWidth, variantHeight, bytes.LongLength, transform.F));
+                uploads.Add(store.Put(key, bytes, transform.ContentType, "public, max-age=31536000, immutable"));
             }
+
+            await Task.WhenAll(uploads);
+
+            await Sql.Exec(db.Source, """
+                insert into variants (asset_id, transform, object_key, width, height, bytes, format)
+                select @id, t.transform, t.key, t.width, t.height, t.bytes, t.format
+                from unnest(@transforms::text[], @keys::text[], @widths::int[], @heights::int[],
+                            @bytes::bigint[], @formats::text[])
+                     as t(transform, key, width, height, bytes, format)
+                on conflict (asset_id, transform) do update
+                set object_key = excluded.object_key, width = excluded.width, height = excluded.height,
+                    bytes = excluded.bytes, format = excluded.format
+                """, ct,
+                ("id", job.AssetId),
+                ("transforms", rows.Select(r => r.Transform).ToArray()),
+                ("keys", rows.Select(r => r.Key).ToArray()),
+                ("widths", rows.Select(r => r.Width).ToArray()),
+                ("heights", rows.Select(r => r.Height).ToArray()),
+                ("bytes", rows.Select(r => r.Bytes).ToArray()),
+                ("formats", rows.Select(r => r.Format).ToArray()));
 
             // Report the encoded source dimensions, not the scaled decode size.
             var swap = codec.EncodedOrigin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop

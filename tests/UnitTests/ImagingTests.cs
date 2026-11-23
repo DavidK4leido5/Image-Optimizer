@@ -46,6 +46,16 @@ public class ImagingTests
     }
 
     [Fact]
+    public void Fill_keeps_its_ratio_when_the_source_is_smaller()
+    {
+        var hero = Transform.Parse("w_1920,h_1080,c_fill,f_webp");
+        Assert.Equal((1200, 675), Imaging.TargetSize(1200, 800, hero));
+
+        var card = Transform.Parse("w_480,h_320,c_fill,f_webp");
+        Assert.Equal((480, 320), Imaging.TargetSize(1200, 800, card));
+    }
+
+    [Fact]
     public void Never_upscales_small_sources()
     {
         var wide = Transform.Parse("w_800,c_fit,f_webp");
