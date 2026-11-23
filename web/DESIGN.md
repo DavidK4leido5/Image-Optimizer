@@ -4,7 +4,7 @@
 
 An operator's console: dense, quiet, scannable. Assets are the primary surface, so the upload zone and grid sit at the top. Services (budgets, telemetry) follow in a two-column band on wide screens. Settings moved into a dialog; the header keeps a chip with the API host and a health pill.
 
-Typeface is IBM Plex Sans, tabular numerals for every number, monospace only for public ids and warehouse codes. One accent (blue) and three semantics (ok, warn, danger). No gradients, no decorative motion. Motion is limited to the drawer entering and the upload progress fill.
+Typeface is IBM Plex Sans, tabular numerals for every number, monospace only for public ids and transforms. One accent (blue) and three semantics (ok, warn, danger). No gradients, no decorative motion. Motion is limited to the drawer entering and the upload progress fill.
 
 ## Tokens
 
