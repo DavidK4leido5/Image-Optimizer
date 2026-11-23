@@ -1,3 +1,5 @@
+using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using Api;
 using CloudinaryClone.Shared;
@@ -11,6 +13,7 @@ var cfg = AppConfig.FromEnvironment();
 var db = Db.Create(cfg.DatabaseUrl);
 var store = new BlobStore(StorageOptions.FromEnvironment());
 var wakeHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
+var grafanaHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
 
 var app = builder.Build();
 await db.EnsureSchema();
@@ -201,6 +204,41 @@ app.MapGet("/i/{publicId}/{spec}", async (string publicId, string spec, HttpCont
     http.Response.Headers.CacheControl = "no-store";
     http.Response.Headers.RetryAfter = "2";
     return Results.Json(new { status = "processing", transform = transform.Canonical }, statusCode: 202);
+});
+
+// Metrics proxy. The Grafana token stays server side; the browser only ever sees this api.
+app.MapGet("/v1/metrics", async (string q, long? start, long? end, string? step, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(cfg.GrafanaPromUrl) || string.IsNullOrWhiteSpace(cfg.GrafanaToken))
+        return Results.Json(
+            new { error = "grafana is not configured", needed = "GRAFANA_PROM_URL, GRAFANA_USER, GRAFANA_TOKEN" },
+            statusCode: 503);
+
+    string path;
+    if (start is not null && end is not null)
+    {
+        if (start >= end) return Results.BadRequest(new { error = "start must be before end" });
+        path = $"api/v1/query_range?query={Uri.EscapeDataString(q)}&start={start}&end={end}&step={Uri.EscapeDataString(step ?? "30s")}";
+    }
+    else
+    {
+        path = $"api/v1/query?query={Uri.EscapeDataString(q)}";
+    }
+
+    using var request = new HttpRequestMessage(HttpMethod.Get, $"{cfg.GrafanaPromUrl.TrimEnd('/')}/{path}");
+    var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{cfg.GrafanaUser}:{cfg.GrafanaToken}"));
+    request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+
+    try
+    {
+        using var response = await grafanaHttp.SendAsync(request, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        return Results.Content(body, "application/json", statusCode: (int)response.StatusCode);
+    }
+    catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+    {
+        return Results.Json(new { error = "grafana unreachable", detail = ex.Message }, statusCode: 502);
+    }
 });
 
 app.Run();
