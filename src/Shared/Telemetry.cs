@@ -27,7 +27,8 @@ public static class Telemetry
             .WithMetrics(m =>
             {
                 m.AddAspNetCoreInstrumentation()
-                    .AddNpgsqlInstrumentation();
+                    .AddNpgsqlInstrumentation()
+                    .AddRuntimeInstrumentation();
                 if (export) m.AddOtlpExporter();
             });
 
