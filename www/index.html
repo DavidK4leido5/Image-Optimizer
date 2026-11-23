@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>image service</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b0d10; --panel:#14181d; --line:#232a32; --text:#e6e9ee; --muted:#8b949e; --accent:#4f8cff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding:28px 32px 8px; }
+  h1 { margin:0; font-size:18px; font-weight:600; letter-spacing:.2px; }
+  header p { margin:6px 0 0; color:var(--muted); }
+  main { padding:20px 32px 48px; max-width:1200px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+  .field { display:flex; flex-direction:column; gap:4px; }
+  .field label { color:var(--muted); font-size:12px; }
+  input[type=text] { background:#0e1116; border:1px solid var(--line); color:var(--text); border-radius:6px; padding:8px 10px; min-width:240px; }
+  input[type=file] { color:var(--muted); }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:9px 16px; font-weight:600; cursor:pointer; }
+  button.secondary { background:transparent; border:1px solid var(--line); color:var(--text); font-weight:500; }
+  button:disabled { opacity:.5; cursor:default; }
+  .status { margin:14px 0 0; color:var(--muted); min-height:20px; }
+  .status.err { color:#ff6b6b; }
+  .grid { margin-top:20px; display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .card img { display:block; width:100%; height:160px; object-fit:cover; background:#0e1116; }
+  .card .meta { padding:10px 12px 12px; }
+  .card .id { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; color:var(--muted); }
+  .pill { display:inline-block; padding:2px 8px; border-radius:99px; font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  .pill.ready { background:#12351f; color:#5ddc8a; }
+  .pill.processing { background:#3a2b10; color:#f0b429; }
+  .pill.pending { background:#1b2533; color:#7fa8ff; }
+  .pill.failed { background:#3a1616; color:#ff7b7b; }
+  .variants { margin-top:8px; display:flex; flex-direction:column; gap:4px; }
+  .variants a { color:var(--accent); text-decoration:none; font-size:12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>image service</h1>
+  <p>upload once, the processor writes immutable variants, the cdn serves them.</p>
+</header>
+<main>
+  <section class="panel">
+    <div class="field"><label for="api">api base</label><input id="api" type="text" value="http://localhost:5080"></div>
+    <div class="field"><label for="key">api key</label><input id="key" type="text" value="dev-local-key"></div>
+    <div class="field"><label for="cdn">cdn base</label><input id="cdn" type="text" placeholder="defaults to api base"></div>
+    <div class="field"><label for="file">image</label><input id="file" type="file" accept="image/jpeg,image/png,image/webp,image/gif"></div>
+    <button id="upload">Upload</button>
+    <button id="refresh" class="secondary">Refresh</button>
+  </section>
+  <p id="status" class="status"></p>
+  <section id="gallery" class="grid"></section>
+</main>
+<script>
+  const el = (id) => document.getElementById(id);
+  const apiBase = () => el('api').value.replace(/\/$/, '');
+  const apiKey = () => el('key').value;
+  const imageBase = () => (el('cdn').value.trim() || el('api').value).replace(/\/$/, '');
+  let pollTimer = null;
+
+  for (const id of ['api', 'key', 'cdn']) {
+    el(id).value = localStorage.getItem('img.' + id) || el(id).value;
+    el(id).addEventListener('change', () => localStorage.setItem('img.' + id, el(id).value));
+  }
+
+  function status(message, error) {
+    el('status').textContent = message;
+    el('status').className = 'status' + (error ? ' err' : '');
+  }
+
+  async function upload() {
+    const file = el('file').files[0];
+    if (!file) return status('pick an image first', true);
+    if (!file.type.startsWith('image/')) return status('that is not an image', true);
+
+    el('upload').disabled = true;
+    try {
+      status('creating asset');
+      const created = await fetch(apiBase() + '/v1/assets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey() },
+        body: JSON.stringify({ fileName: file.name, contentType: file.type, bytes: file.size })
+      });
+      if (!created.ok) throw new Error('create: ' + created.status + ' ' + await created.text());
+      const asset = await created.json();
+
+      status('uploading ' + file.name + ' (' + Math.round(file.size / 1024) + ' kb)');
+      const put = await fetch(asset.upload.url, {
+        method: asset.upload.method,
+        headers: asset.upload.headers,
+        body: file
+      });
+      if (!put.ok) throw new Error('storage: ' + put.status + ' ' + await put.text());
+
+      status('processing');
+      const complete = await fetch(apiBase() + '/v1/assets/' + asset.publicId + '/complete', {
+        method: 'POST',
+        headers: { 'X-Api-Key': apiKey() }
+      });
+      if (!complete.ok) throw new Error('complete: ' + complete.status + ' ' + await complete.text());
+
+      await load();
+      poll();
+    } catch (error) {
+      status(error.message, true);
+    } finally {
+      el('upload').disabled = false;
+    }
+  }
+
+  function poll() {
+    clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      const pending = await load();
+      if (!pending) clearInterval(pollTimer);
+    }, 2000);
+  }
+
+  async function load() {
+    const response = await fetch(apiBase() + '/v1/assets', { headers: { 'X-Api-Key': apiKey() } });
+    if (!response.ok) { status('list: ' + response.status, true); return false; }
+    const assets = await response.json();
+    render(assets);
+    return assets.some((a) => a.status === 'pending' || a.status === 'processing');
+  }
+
+  function render(assets) {
+    const gallery = el('gallery');
+    gallery.replaceChildren();
+    if (!assets.length) { status('no assets yet'); return; }
+    const pending = assets.filter((a) => a.status === 'pending' || a.status === 'processing').length;
+    status(pending ? pending + ' asset(s) processing' : assets.length + ' assets');
+
+    for (const asset of assets) {
+      const card = document.createElement('article');
+      card.className = 'card';
+
+      const image = document.createElement('img');
+      image.alt = asset.publicId;
+      image.loading = 'lazy';
+      if (asset.variants.length) image.src = imageBase() + asset.variants[0].url;
+      card.appendChild(image);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+
+      const head = document.createElement('div');
+      head.style.display = 'flex';
+      head.style.justifyContent = 'space-between';
+      head.style.alignItems = 'center';
+
+      const id = document.createElement('span');
+      id.className = 'id';
+      id.textContent = asset.publicId;
+      const pill = document.createElement('span');
+      pill.className = 'pill ' + asset.status;
+      pill.textContent = asset.status;
+      head.append(id, pill);
+      meta.appendChild(head);
+
+      if (asset.error) {
+        const error = document.createElement('div');
+        error.style.color = '#ff7b7b';
+        error.style.fontSize = '12px';
+        error.style.marginTop = '6px';
+        error.textContent = asset.error;
+        meta.appendChild(error);
+      }
+
+      const variants = document.createElement('div');
+      variants.className = 'variants';
+      for (const variant of asset.variants) {
+        const link = document.createElement('a');
+        link.href = imageBase() + variant.url;
+        link.target = '_blank';
+        link.rel = 'noreferrer';
+        link.textContent = variant.transform + ' · ' + Math.round(variant.bytes / 1024) + ' kb';
+        variants.appendChild(link);
+      }
+      meta.appendChild(variants);
+      card.appendChild(meta);
+      gallery.appendChild(card);
+    }
+  }
+
+  el('upload').addEventListener('click', upload);
+  el('refresh').addEventListener('click', load);
+  load();
+</script>
+</body>
+</html>

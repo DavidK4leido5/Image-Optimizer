@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - run: dotnet restore CloudinaryClone.slnx
+      - run: dotnet build CloudinaryClone.slnx -c Release --no-restore
+      - run: dotnet test CloudinaryClone.slnx -c Release --no-build
+
+      - run: docker build -f Dockerfile.api -t cloudinary-api .
+      - run: docker build -f Dockerfile.processor -t cloudinary-processor .

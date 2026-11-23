@@ -1,0 +1,21 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY Directory.Build.props ./
+COPY src/Shared/Shared.csproj src/Shared/
+COPY src/Processor/Processor.csproj src/Processor/
+RUN dotnet restore src/Processor/Processor.csproj
+COPY src/Shared/ src/Shared/
+COPY src/Processor/ src/Processor/
+RUN dotnet publish src/Processor/Processor.csproj -c Release -o /app --no-restore /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgssapi-krb5-2 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /app .
+USER app
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+# Render injects PORT (default 10000); compose leaves it unset and gets 8080.
+ENTRYPOINT ["/bin/sh", "-c", "ASPNETCORE_URLS=http://+:${PORT:-8080} exec dotnet Processor.dll"]

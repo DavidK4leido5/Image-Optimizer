@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- net10.0 targets, but this machine has only the 11.0 runtime. Docker ships 10.0. -->
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+</Project>

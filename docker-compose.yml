@@ -1,0 +1,85 @@
+name: cloudinary-clone
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cloud
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cloud"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Local stand-in for Supabase Storage. Test-only, not for production.
+  s3:
+    image: adobe/s3mock:latest
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: images
+    ports:
+      - "9090:9090"
+      - "9191:9191"
+    volumes:
+      - s3data:/s3mockroot
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/favicon.ico"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      DATABASE_URL: Host=postgres;Port=5432;Database=cloud;Username=postgres;Password=postgres
+      API_KEY: dev-local-key
+      INTERNAL_KEY: dev-internal-key
+      PROCESSOR_URL: http://processor:8080
+      S3_ENDPOINT: http://s3:9090
+      S3_PUBLIC_ENDPOINT: http://localhost:9090
+      S3_PUBLIC_BASE: http://localhost:9090
+      S3_ACCESS_KEY: test
+      S3_SECRET_KEY: test
+      S3_BUCKET: images
+      S3_REGION: us-east-1
+    ports:
+      - "5080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+
+  processor:
+    build:
+      context: .
+      dockerfile: Dockerfile.processor
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      DATABASE_URL: Host=postgres;Port=5432;Database=cloud;Username=postgres;Password=postgres
+      INTERNAL_KEY: dev-internal-key
+      S3_ENDPOINT: http://s3:9090
+      S3_PUBLIC_ENDPOINT: http://localhost:9090
+      S3_PUBLIC_BASE: http://localhost:9090
+      S3_ACCESS_KEY: test
+      S3_SECRET_KEY: test
+      S3_BUCKET: images
+      S3_REGION: us-east-1
+    ports:
+      - "5081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  s3data:

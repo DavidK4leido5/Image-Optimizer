@@ -1,0 +1,7 @@
+name = "cloudinary-delivery"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+# local: the compose api. production: https://<your-api>.onrender.com
+ORIGIN = "http://localhost:5080"
