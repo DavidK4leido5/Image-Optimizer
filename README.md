@@ -2,6 +2,8 @@
 
 A small Cloudinary: upload an image once, a worker writes immutable resized variants to object storage, a CDN serves them. Two .NET services, Postgres, S3-compatible storage, one Cloudflare Worker. Runs entirely on free tiers.
 
+Scaling to a full-time, multi-tenant service: [SCALING.md](SCALING.md).
+
 ```
 browser ──presign──> api ──────────────────────> postgres (assets, variants, jobs)
    │                   │                              │
@@ -286,6 +288,8 @@ A job that fails three times is abandoned and the asset is marked `failed` with 
 - **Resumable uploads and WebSocket progress.** Uploads are one PUT with XHR progress; polling covers the rest.
 
 The honest summary: this is a small system with production-shaped seams. The parts that make Cloudinary fast are here (immutable derivatives, edge caching, a closed transform catalog, a durable queue, backpressure). The parts that make it a business (purge, signed URLs, tenancy, global replication) were left out on purpose, because they either cost money or need infrastructure a free tier does not provide.
+
+[SCALING.md](SCALING.md) takes each of those seams and shows what it becomes at 10k, 100k, and millions of users, including capacity math, a cost model, and a phased migration plan.
 ## Quick start
 
 ```bash
