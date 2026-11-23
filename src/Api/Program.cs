@@ -15,7 +15,6 @@ var db = Db.Create(cfg.DatabaseUrl);
 var store = new BlobStore(StorageOptions.FromEnvironment());
 var wakeHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
 var grafanaHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-var purgeHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(6) };
 
 var app = builder.Build();
 await db.EnsureSchema();
@@ -169,15 +168,13 @@ app.MapDelete("/v1/assets/{publicId}", async (string publicId, CancellationToken
 
     if (asset is null) return Results.NotFound();
 
-    var variants = await Sql.Query(db.Source, "select object_key, transform from variants where asset_id = @id", ct,
-        r => (Key: r.GetString(0), Transform: r.GetString(1)), ("id", asset.Id));
+    var variants = await Sql.Query(db.Source, "select object_key from variants where asset_id = @id", ct,
+        r => r.GetString(0), ("id", asset.Id));
 
-    foreach (var variant in variants.Append((Key: asset.Key, Transform: string.Empty)))
-        await store.Delete(variant.Key);
+    foreach (var key in variants.Append(asset.Key))
+        await store.Delete(key);
 
     await Sql.Exec(db.Source, "delete from assets where id = @id", ct, ("id", asset.Id));
-
-    await CdnPurge.Purge(purgeHttp, cfg, app.Logger, publicId, variants.Select(v => v.Transform), ct);
     return Results.NoContent();
 });
 

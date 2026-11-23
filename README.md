@@ -157,7 +157,7 @@ Delivery uses a closed set of named presets, so a caller cannot invent a size:
 
 `https://<worker>/i/<id>/lg.webp` generates on the first request and is cached for a year after. While a preset builds, the api redirects to the closest ready variant with `X-Fallback: 1`; the worker returns it with `no-store` so a low-res image is never pinned under a high-res URL. Upload still creates only the three original variants.
 
-Deleting an asset can purge the CDN, but the Cloudflare purge API needs a zone. `workers.dev` URLs cannot be purged. Set `CDN_BASE_URL`, `CF_ZONE_ID`, and `CF_PURGE_TOKEN` once the worker has a custom domain; without them, delete skips the purge and logs nothing.
+There is no cache purge on `workers.dev`, so a deleted asset's URL can keep returning the cached bytes until the one-year TTL or an eviction. The database row and the storage object are gone immediately, and storage does not count cached bytes against the 1 GB allowance. That is an accepted tradeoff on the free plan: purge needs a custom domain in a Cloudflare zone.
 
 ### 4. GitHub Pages (console)
 
