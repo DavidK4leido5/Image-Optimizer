@@ -146,7 +146,22 @@ A job that fails three times is abandoned and the asset is marked `failed` with 
 
 The honest summary: this is a small system with production-shaped seams. The parts that make Cloudinary fast are here (immutable derivatives, edge caching, a closed transform catalog, a durable queue, backpressure). The parts that make it a business (purge, signed URLs, tenancy, global replication) were left out on purpose, because they either cost money or need infrastructure a free tier does not provide.
 
-[SCALING.md](SCALING.md) takes each of those seams and shows what it becomes at 10k, 100k, and millions of users, including capacity math, a cost model, and a phased migration plan.
+### Scaling path
+
+The shape does not change; the size does.
+
+| Stage | Deliveries per month | What changes |
+|---|---|---|
+| Today | thousands | free tiers, one worker, no purge |
+| 10x | 5M | paid instances and Postgres, custom domain, purge |
+| 100x | 50M | SQS, worker autoscale, origin shield, read replica |
+| 1,000x | 500M | multi-AZ, partitioned variants, R2, tenancy and quotas |
+| 10,000x | 5B | multi-CDN, cells, sharding, dedicated on-call |
+
+The order is edge first, then queue and workers, then the database, then regions. Compute stays off the request path, derivatives stay immutable, and the catalog stays closed. Those are the same decisions Cloudinary-class systems run on; what changes is redundancy, tenancy, and the size of each part.
+
+At 500M deliveries a month the math is roughly 193 average QPS, 10 origin QPS at a 95% hit ratio, 36TB of objects, and about $1,700/month with R2's free egress. The target architecture, capacity formulas, cost table, failure domains, and phased exit criteria are in [SCALING.md](SCALING.md).
+
 ## Quick start
 
 ```bash
