@@ -237,7 +237,9 @@ app.MapGet("/i/{publicId}/{spec}", async (string publicId, string spec, HttpCont
         return Results.Json(new { status = "processing", preset = preset.Name, transform = transform.Canonical }, statusCode: 202);
     }
 
-    // Show the closest ready variant while the exact preset builds. The Worker will not cache this.
+    // Show the closest ready variant while the exact preset builds. This is a 202 with a
+    // fallback URL rather than a redirect: Workers follows redirects, which would cache the
+    // low-res image under the high-res URL for a year.
     var fallback = await Sql.QueryOne(db.Source, """
         select object_key from variants
         where asset_id = @id
@@ -246,8 +248,9 @@ app.MapGet("/i/{publicId}/{spec}", async (string publicId, string spec, HttpCont
         """, ct, r => r.GetString(0), ("id", asset.Id), ("width", transform.W ?? 0));
 
     http.Response.Headers.CacheControl = "no-store";
-    http.Response.Headers["X-Fallback"] = "1";
-    return Results.Redirect(store.PublicUrl(fallback ?? asset.OriginalKey));
+    http.Response.Headers.RetryAfter = "2";
+    http.Response.Headers["X-Fallback-Url"] = store.PublicUrl(fallback ?? asset.OriginalKey);
+    return Results.Json(new { status = "processing", preset = preset.Name, transform = transform.Canonical }, statusCode: 202);
 });
 
 // Free-tier usage that we can measure with the credentials we already have.
