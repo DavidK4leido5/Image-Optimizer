@@ -91,5 +91,7 @@ export async function queryMetric(query: string, start: number, end: number): Pr
   }>('/v1/metrics?q=' + encodeURIComponent(query) + '&start=' + start + '&end=' + end + '&step=60s');
 
   const values = body?.data?.result?.[0]?.values ?? [];
-  return values.map(([time, value]) => [time, Number(value)]);
+  return values
+    .map(([time, value]) => [time, Number(value)] as Point)
+    .filter(([, value]) => Number.isFinite(value));
 }

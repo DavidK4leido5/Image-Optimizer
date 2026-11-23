@@ -49,6 +49,10 @@ export default function App() {
   }, [config.api]);
 
   const refresh = useCallback(async () => {
+    if (!config.key) {
+      setStatus('set your api key');
+      return;
+    }
     try {
       const next = await listAssets();
       setAssets(next);
@@ -70,6 +74,11 @@ export default function App() {
   }, [refresh]);
 
   const loadTelemetry = useCallback(async () => {
+    if (!config.key) {
+      setTelemetry(EMPTY);
+      setTelemetryError('');
+      return;
+    }
     const queries = QUERIES(service);
     const end = Math.floor(Date.now() / 1000);
     const start = end - 3600;
