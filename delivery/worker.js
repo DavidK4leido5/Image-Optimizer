@@ -13,7 +13,7 @@ export default {
     const response = await fetch(origin);
 
     if (response.status === 202) {
-      // The preset is still building. Serve the closest ready variant, never cache it.
+      // Preset still building: serve the closest ready variant, never cache it.
       const fallbackUrl = response.headers.get("X-Fallback-Url");
       if (fallbackUrl) {
         const fallback = await fetch(fallbackUrl, { method: request.method });
@@ -21,6 +21,7 @@ export default {
           const out = new Response(request.method === "HEAD" ? null : fallback.body, fallback);
           out.headers.set("Access-Control-Allow-Origin", "*");
           out.headers.set("Cache-Control", "no-store");
+          out.headers.set("CDN-Cache-Control", "no-store");
           return out;
         }
       }
@@ -36,7 +37,7 @@ export default {
     out.headers.set("Cache-Control", "public, max-age=31536000, immutable");
     out.headers.set("Access-Control-Allow-Origin", "*");
 
-    if (request.method === "GET") ctx.waitUntil(cache.put(request, out.clone()));
+    if (request.method === "GET") ctx.waitUntil(cache.put(request, out.clone()).catch(() => {}));
     return out;
   },
 };
