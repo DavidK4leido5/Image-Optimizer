@@ -62,7 +62,20 @@ export default function App() {
   const [status, setStatus] = useState<StatusFilter>('all');
   const [sort, setSort] = useState<SortOrder>('newest');
   const [page, setPage] = useState(1);
+  const [configEpoch, setConfigEpoch] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
+  const appliedConfig = useRef(config.api + '|' + config.key);
+
+  // Typing a key should not fire a request per keystroke; save immediately, reload once idle.
+  useEffect(() => {
+    const next = config.api + '|' + config.key;
+    if (next === appliedConfig.current) return;
+    const timer = window.setTimeout(() => {
+      appliedConfig.current = next;
+      setConfigEpoch((epoch) => epoch + 1);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [config.api, config.key]);
 
   const imageBase = (config.cdn.trim() || config.api).replace(/\/$/, '');
   const hasKey = config.key.trim().length > 0;
@@ -142,16 +155,23 @@ export default function App() {
   }, [config.key, config.api, service, range]);
 
   usePolling(probe, 60000, true);
-  usePolling(loadAssets, 5000, hasKey, config.api + '|' + config.key);
-  usePolling(loadLimits, 60000, hasKey, config.api + '|' + config.key);
-  usePolling(loadTelemetry, 30000, hasKey, config.api + '|' + config.key + '|' + service + '|' + range);
+  usePolling(loadAssets, 5000, hasKey, String(configEpoch));
+  usePolling(loadLimits, 60000, hasKey, String(configEpoch));
+  usePolling(loadTelemetry, 30000, hasKey, configEpoch + '|' + service + '|' + range);
 
   useEffect(() => {
     setPage(1);
   }, [search, status, sort]);
 
   useEffect(() => {
-    if (!hasKey) setAssetsLoading(false);
+    if (hasKey) return;
+    setAssets([]);
+    setLimits(null);
+    setTelemetry(EMPTY_TELEMETRY);
+    setAssetsError(null);
+    setLimitsError(null);
+    setTelemetryError(null);
+    setAssetsLoading(false);
   }, [hasKey]);
 
   const filtered = useMemo(() => {
