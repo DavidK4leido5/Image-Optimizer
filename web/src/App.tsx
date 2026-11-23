@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Asset, Point } from './api';
-import { deleteAsset, health, listAssets, loadConfig, queryMetric, saveConfig, upload } from './api';
+import type { Asset, Limits, Point } from './api';
+import {
+  deleteAsset,
+  getLimits,
+  health,
+  listAssets,
+  loadConfig,
+  queryMetric,
+  saveConfig,
+  upload,
+} from './api';
 import { Spark } from './Spark';
 
 type Telemetry = { cpu: Point[]; rss: Point[]; heap: Point[]; rps: Point[]; p95: Point[] };
@@ -35,6 +44,8 @@ export default function App() {
   const [service, setService] = useState('cloudinary-api');
   const [telemetry, setTelemetry] = useState<Telemetry>(EMPTY);
   const [telemetryError, setTelemetryError] = useState('');
+  const [limits, setLimits] = useState<Limits | null>(null);
+  const [rangeHours, setRangeHours] = useState(1);
 
   useEffect(() => saveConfig(config), [config]);
 
@@ -81,21 +92,40 @@ export default function App() {
     }
     const queries = QUERIES(service);
     const end = Math.floor(Date.now() / 1000);
-    const start = end - 3600;
+    const start = end - rangeHours * 3600;
+    const step = rangeHours <= 1 ? '60s' : '300s';
     try {
       const [cpu, rss, heap, rps, p95] = await Promise.all([
-        queryMetric(queries.cpu, start, end),
-        queryMetric(queries.rss, start, end),
-        queryMetric(queries.heap, start, end),
-        queryMetric(queries.rps, start, end),
-        queryMetric(queries.p95, start, end),
+        queryMetric(queries.cpu, start, end, step),
+        queryMetric(queries.rss, start, end, step),
+        queryMetric(queries.heap, start, end, step),
+        queryMetric(queries.rps, start, end, step),
+        queryMetric(queries.p95, start, end, step),
       ]);
       setTelemetry({ cpu, rss, heap, rps, p95 });
       setTelemetryError('');
     } catch (error) {
       setTelemetryError(error instanceof Error ? error.message : String(error));
     }
-  }, [config.api, config.key, service]);
+  }, [config.api, config.key, service, rangeHours]);
+
+  const loadLimits = useCallback(async () => {
+    if (!config.key) {
+      setLimits(null);
+      return;
+    }
+    try {
+      setLimits(await getLimits());
+    } catch {
+      // keep the last good reading
+    }
+  }, [config.api, config.key]);
+
+  useEffect(() => {
+    loadLimits();
+    const timer = setInterval(loadLimits, 60000);
+    return () => clearInterval(timer);
+  }, [loadLimits]);
 
   useEffect(() => {
     loadTelemetry();
@@ -199,7 +229,15 @@ export default function App() {
                 {name.replace('cloudinary-', '')}
               </button>
             ))}
-            <span className="muted">last 60 min</span>
+            <select
+              aria-label="time range"
+              value={rangeHours}
+              onChange={(event) => setRangeHours(Number(event.target.value))}
+            >
+              <option value={1}>1h</option>
+              <option value={6}>6h</option>
+              <option value={24}>24h</option>
+            </select>
           </div>
         </div>
 
@@ -249,6 +287,41 @@ export default function App() {
             />
           </div>
         )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <h2>free tier</h2>
+          <span className="muted">measured · refreshed every 60s</span>
+        </div>
+        {limits ? (
+          <div className="budgets">
+            <Budget
+              label="database"
+              used={limits.database.bytes}
+              limit={limits.database.limit}
+              detail="Supabase free: 500 MB"
+            />
+            <Budget
+              label="storage"
+              used={limits.storage.bytes}
+              limit={limits.storage.limit}
+              detail={limits.storage.objects + ' objects · Supabase free: 1 GB'}
+            />
+            <Budget
+              label="queue"
+              used={limits.queue.depth}
+              limit={limits.queue.limit}
+              detail="jobs pending or leased"
+              format={(value) => String(value)}
+            />
+          </div>
+        ) : (
+          <p className="muted">set your api key to load usage</p>
+        )}
+        <p className="muted small">
+          Render instance hours, Worker requests and Supabase egress are only visible in their dashboards.
+        </p>
       </section>
 
       <section className="panel">
@@ -305,6 +378,31 @@ export default function App() {
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+function Budget(props: {
+  label: string;
+  used: number;
+  limit: number;
+  detail: string;
+  format?: (value: number) => string;
+}) {
+  const format = props.format ?? bytes;
+  const percent = Math.min(100, (props.used / props.limit) * 100);
+  return (
+    <div className="budget">
+      <div className="budget-head">
+        <span>{props.label}</span>
+        <strong>
+          {format(props.used)} / {format(props.limit)}
+        </strong>
+      </div>
+      <div className="bar">
+        <div style={{ width: percent.toFixed(1) + '%' }} />
+      </div>
+      <span className="muted">{props.detail}</span>
     </div>
   );
 }

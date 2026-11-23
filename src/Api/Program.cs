@@ -216,6 +216,37 @@ app.MapGet("/i/{publicId}/{spec}", async (string publicId, string spec, HttpCont
     return Results.Json(new { status = "processing", transform = transform.Canonical }, statusCode: 202);
 });
 
+// Free-tier usage that we can measure with the credentials we already have.
+app.MapGet("/v1/limits", async (CancellationToken ct) =>
+{
+    var dbBytes = await Sql.QueryOne(db.Source,
+        "select pg_database_size(current_database())", ct, r => r.GetInt64(0));
+
+    var originals = await Sql.QueryOne(db.Source,
+        "select count(*)::int, coalesce(sum(bytes), 0)::bigint from assets", ct,
+        r => new Usage(r.GetInt32(0), r.GetInt64(1))) ?? new Usage(0, 0);
+
+    var variants = await Sql.QueryOne(db.Source,
+        "select count(*)::int, coalesce(sum(bytes), 0)::bigint from variants", ct,
+        r => new Usage(r.GetInt32(0), r.GetInt64(1))) ?? new Usage(0, 0);
+
+    var queue = await Sql.QueryOne(db.Source, "select count(*)::int from jobs", ct, r => r.GetInt32(0));
+
+    return Results.Ok(new
+    {
+        database = new { bytes = dbBytes, limit = 500L * 1024 * 1024 },
+        storage = new
+        {
+            bytes = originals.Bytes + variants.Bytes,
+            objects = originals.Count + variants.Count,
+            limit = 1024L * 1024 * 1024,
+        },
+        queue = new { depth = queue, limit = MaxQueueDepth },
+        assets = originals.Count,
+        measuredAt = DateTimeOffset.UtcNow,
+    });
+});
+
 // Metrics proxy. The Grafana token stays server side; the browser only ever sees this api.
 app.MapGet("/v1/metrics", async (string q, long? start, long? end, string? step, CancellationToken ct) =>
 {
@@ -311,6 +342,8 @@ static void Wake(AppConfig cfg, HttpClient http, ILogger logger)
         }
     });
 }
+
+sealed record Usage(int Count, long Bytes);
 
 sealed record CreateAssetRequest(string? FileName, string? ContentType, long Bytes, string[]? Transforms);
 

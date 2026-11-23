@@ -16,6 +16,14 @@ export type Config = { api: string; key: string; cdn: string };
 
 export type Point = [number, number];
 
+export type Limits = {
+  database: { bytes: number; limit: number };
+  storage: { bytes: number; objects: number; limit: number };
+  queue: { depth: number; limit: number };
+  assets: number;
+  measuredAt: string;
+};
+
 const DEFAULTS: Config = {
   api: 'https://cloudinary-api-k1t3.onrender.com',
   key: '',
@@ -61,6 +69,8 @@ export async function health(): Promise<boolean> {
 
 export const listAssets = () => call<Asset[]>('/v1/assets');
 
+export const getLimits = () => call<Limits>('/v1/limits');
+
 export const deleteAsset = (publicId: string) =>
   call<void>('/v1/assets/' + publicId, { method: 'DELETE' });
 
@@ -85,10 +95,24 @@ export async function upload(file: File, status: (message: string) => void) {
   await call('/v1/assets/' + created.publicId + '/complete', { method: 'POST' });
 }
 
-export async function queryMetric(query: string, start: number, end: number): Promise<Point[]> {
+export async function queryMetric(
+  query: string,
+  start: number,
+  end: number,
+  step = '60s',
+): Promise<Point[]> {
   const body = await call<{
     data?: { result?: { values?: [number, string][] }[] };
-  }>('/v1/metrics?q=' + encodeURIComponent(query) + '&start=' + start + '&end=' + end + '&step=60s');
+  }>(
+    '/v1/metrics?q=' +
+      encodeURIComponent(query) +
+      '&start=' +
+      start +
+      '&end=' +
+      end +
+      '&step=' +
+      encodeURIComponent(step),
+  );
 
   const values = body?.data?.result?.[0]?.values ?? [];
   return values
