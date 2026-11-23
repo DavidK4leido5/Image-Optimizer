@@ -37,6 +37,255 @@ That is what makes the whole thing cost zero: compute runs once per upload, stor
 
 The split is not decoration. The API is tiny and latency-sensitive. The processor is CPU-heavy, single-threaded on 512MB, and must never be publicly reachable. They share a database because they are two halves of one pipeline, not two products.
 
+## Architecture in detail
+
+The diagram at the top is the system in one glance. This section is the same system at the level of protocols, tables, and failure modes.
+
+The through-line is the same one Cloudinary, imgix, and every serious image service use: **compute once, write an immutable object, cache the URL forever, and never resize on the read path**. Free tiers only change the size of the machinery, not the shape of the design.
+
+### System map
+
+```mermaid
+flowchart LR
+  subgraph client["Client"]
+    web["Operator console<br/>GitHub Pages"]
+  end
+
+  subgraph edge["Cloudflare edge, free plan"]
+    worker["Worker<br/>cloudinary-delivery"]
+    cache[("Cache<br/>per data center")]
+  end
+
+  subgraph render["Render, free plan"]
+    api["API<br/>control plane"]
+    proc["Processor<br/>data plane"]
+  end
+
+  subgraph supabase["Supabase, free plan"]
+    pg[("Postgres<br/>assets, variants, jobs")]
+    s3[("Storage<br/>images bucket")]
+  end
+
+  graf["Grafana Cloud<br/>OTLP and Prometheus"]
+
+  web -->|"POST /v1/assets"| api
+  api -->|"presigned PUT"| web
+  web -->|"PUT bytes, direct"| s3
+  web -->|"POST /complete"| api
+  api -->|"insert job"| pg
+  api -->|"POST /wake"| proc
+  proc -->|"claim with SKIP LOCKED"| pg
+  proc -->|"GET original"| s3
+  proc -->|"PUT variants"| s3
+  proc -->|"insert variants"| pg
+  web -->|"GET /i/id/preset.webp"| worker
+  worker -->|"cache miss"| api
+  api -->|"302 to exact object"| worker
+  worker -->|"GET object"| s3
+  worker --- cache
+  api -.->|"OTLP"| graf
+  proc -.->|"OTLP"| graf
+```
+
+Who calls whom, and with what credential:
+
+| From | To | Transport | Credential |
+|---|---|---|---|
+| Browser | API | HTTPS JSON | `X-Api-Key` |
+| Browser | Storage | HTTPS PUT to a presigned URL | signature in the URL, 10 minute expiry |
+| Browser | Worker | HTTPS GET/HEAD | public |
+| Worker | API | HTTPS | none, delivery routes are public |
+| Worker | Storage | HTTPS | none, the bucket is public for reads |
+| API | Processor | HTTP POST `/wake` | `X-Internal-Key` |
+| API, Processor | Postgres | Npgsql on the Supavisor pooler | database password, RLS bypassed as owner |
+| API, Processor | Grafana | OTLP HTTP/protobuf | Grafana token, server side only |
+
+The processor has no public route. Render only exposes the API and the Worker. The browser never sees a Grafana token; `/v1/metrics` is a server-side proxy.
+
+### Upload path
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant A as API
+  participant P as Postgres
+  participant S as Storage
+  participant W as Processor
+
+  B->>A: POST /v1/assets with name, type, bytes
+  A->>P: insert asset, status pending
+  A->>S: presign PUT, 10 minute expiry
+  A-->>B: 201 with publicId and upload target
+  B->>S: PUT the bytes directly
+  B->>A: POST /v1/assets/{id}/complete
+  A->>S: HEAD the object for its real size
+  A->>P: status processing, insert job
+  A->>W: POST /wake, fire and forget
+  A-->>B: 202 processing
+  W->>P: claim one job with FOR UPDATE SKIP LOCKED
+  W->>S: GET original once
+  W->>W: scaled decode, orient, resize, encode
+  W->>S: PUT three variants under deterministic keys
+  W->>P: insert variants, status ready, delete job
+  B->>A: GET /v1/assets every 5 seconds
+  A-->>B: ready with variant URLs
+```
+
+Three details make this survive a 0.1 CPU worker:
+
+- **The API never touches image bytes.** Render caps request bodies at 4.5MB and the upload cap is 20MB. Presigning moves the transfer to Supabase, so the API only writes a row and returns.
+- **One download, three writes.** The processor fetches the original once, decodes it once at the largest needed size, and encodes every variant from that bitmap.
+- **The job is durable before the response.** If the processor is asleep, the row sits in `jobs`; `complete` wakes it, and a crashed worker's lease expires after three minutes.
+
+### Delivery path, including lazy presets
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant W as Worker
+  participant C as Edge cache
+  participant A as API
+  participant S as Storage
+
+  B->>W: GET /i/abc123/lg.webp
+  W->>C: cache.match
+  alt cached
+    C-->>W: 200, one year
+    W-->>B: 200
+  else miss
+    W->>A: GET /i/abc123/lg.webp
+    alt exact variant exists
+      A-->>W: 302 to the object
+      W->>S: GET object
+      W->>C: put, one year immutable
+      W-->>B: 200
+    else preset missing
+      A->>A: enqueue one on-demand job
+      A-->>W: 202 with X-Fallback-Url
+      W->>S: GET the closest ready variant
+      W-->>B: 200, no-store
+    end
+  end
+```
+
+The public delivery surface is a **closed catalog**, not a resize API. Nine presets are generated on first request; `3xl` already exists because it matches the eager 1600 variant.
+
+| Class | Presets | Generated |
+|---|---|---|
+| Eager at upload | 200 fill, 800 fit, 1600 fit | always, three objects |
+| Lazy widths | `sm` `md` `lg` `xl` `2xl` `4xl` | first request |
+| Lazy ratios | `thumb` `card` `hero` | first request |
+| Free by coincidence | `3xl` | already uploaded as the 1600 variant |
+
+The fallback is deliberate. A first request must return pixels, not JSON, and it must not poison the cache. That is why the fallback is a `202` carrying `X-Fallback-Url`, and why the Worker answers it with `Cache-Control: no-store` and `CDN-Cache-Control: no-store`. The exact object is the only thing cached, for a year. An early attempt used a `302`; Workers followed it and cached the low-res fallback under the high-res URL, so the redirect was replaced.
+
+Arbitrary transforms (`w_1234`) return 404. Existing eager variant URLs still resolve because they already exist in the database. Nothing the caller invents can enqueue compute.
+
+### Data model
+
+```mermaid
+erDiagram
+  assets ||--o{ variants : has
+  assets ||--o{ jobs : queues
+
+  assets {
+    uuid id PK
+    text public_id UK
+    text original_key
+    text content_type
+    bigint bytes
+    int width
+    int height
+    text status
+    text error
+    text transforms
+    timestamptz created_at
+  }
+
+  variants {
+    uuid asset_id PK
+    text transform PK
+    text object_key
+    int width
+    int height
+    bigint bytes
+    text format
+  }
+
+  jobs {
+    bigint id PK
+    uuid asset_id FK
+    text transforms
+    int attempts
+    timestamptz next_run_at
+    timestamptz lease_until
+    text last_error
+    timestamptz created_at
+  }
+```
+
+`variants` is keyed by `(asset_id, transform)`, so re-running a job upserts instead of duplicating. Both child tables cascade on delete. `transforms` is a `text[]` on purpose: one job can carry several sizes and the worker writes them in one pass.
+
+RLS is enabled on all three tables with no policies. A Supabase anon key sees nothing; the services connect as the owner and bypass it. Delivery reads the bucket directly, so image bytes never pass through Postgres.
+
+### Asset lifecycle
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending: POST /v1/assets
+  pending --> processing: complete and enqueue
+  pending --> failed: object missing or too large
+  processing --> ready: variants written
+  processing --> processing: retry, up to 3 attempts
+  processing --> failed: attempts exhausted
+  ready --> [*]: DELETE
+  failed --> [*]: DELETE
+```
+
+A job that fails three times is abandoned and the asset is marked `failed` with the decoder's error, which the console shows on the card and in the drawer. A retry never leaves a half-written variant behind, because keys are derived from the transform, not from time.
+
+### How this mirrors production image services
+
+| Concern | Industry practice | What this codebase does |
+|---|---|---|
+| Byte path | direct-to-object-storage uploads | presigned PUT, API stores metadata only |
+| Derivative identity | content hash, immutable key | `v1/{assetId}/{sha256(canonical)[0:16]}.{ext}` |
+| Transform surface | URL grammar plus named transformations | internal grammar, public closed presets |
+| Compute strategy | eager common sizes, lazy long tail | three eager, nine lazy |
+| Work distribution | durable queue, leased claims | Postgres `FOR UPDATE SKIP LOCKED`, 3 minute lease |
+| Idempotency | overwrite the same key on retry | deterministic keys and `(asset_id, transform)` upsert |
+| Backpressure | bounded queue, 429 with retry hint | depth 50, `Retry-After: 10` |
+| CPU discipline | decode at target size, never upscale | Skia scaled decode, no upscale, smallest variant first |
+| Read path | immutable URL, long TTL, edge cache | one year immutable, Worker cache per data center |
+| Degradation | a smaller image beats a broken image | 202 fallback, `no-store`, exact object later |
+| Observability | traces, metrics, usage against quota | OTLP to Grafana, `/v1/metrics` proxy, `/v1/limits` |
+| Security | least privilege, private compute | API key, internal key, RLS, processor unreachable |
+
+### Failure modes and how they degrade
+
+| Failure | Behaviour | What the operator sees |
+|---|---|---|
+| API cold on Render | first request waits for the instance | health pill shows checking, then up with latency |
+| Processor asleep | `complete` wakes it; the job waits in Postgres | upload row stays in processing, delivery serves fallback |
+| Queue at 50 | `complete` returns 429 | upload row shows the wait from `Retry-After` |
+| Object missing at complete | 409, nothing is enqueued | upload row says the object was not found |
+| Object above the cap | 413 and the object is deleted | upload row says the file is too large |
+| Decode failure | three attempts with backoff, then failed | error string on the card and in the drawer |
+| Grafana unconfigured | `/v1/metrics` returns 503 | amber configuration notice, rest of the console works |
+| Deleted image still cached | no purge on `workers.dev` | storage is freed, the old URL may serve until TTL |
+| Tab hidden | polling pauses | no requests until the tab is visible again |
+
+### What is deliberately not here
+
+- **AVIF.** SkiaSharp does not encode it; WebP covers the same ground at this scale.
+- **Cache purge.** It needs a zone, and `workers.dev` is not one. Deleted URLs may stay warm until the year expires; storage is freed immediately.
+- **Signed delivery URLs.** The bucket is public for reads. A private bucket would need a signing hop in the Worker, which is a different product.
+- **Multi-region, multi-tenant, per-account quotas.** One operator, one key, one bucket. The queue cap is the only quota that matters at this size.
+- **Resumable uploads and WebSocket progress.** Uploads are one PUT with XHR progress; polling covers the rest.
+
+The honest summary: this is a small system with production-shaped seams. The parts that make Cloudinary fast are here (immutable derivatives, edge caching, a closed transform catalog, a durable queue, backpressure). The parts that make it a business (purge, signed URLs, tenancy, global replication) were left out on purpose, because they either cost money or need infrastructure a free tier does not provide.
 ## Quick start
 
 ```bash
@@ -84,7 +333,7 @@ curl -s -X DELETE http://localhost:5080/v1/assets/<publicId> -H 'X-Api-Key: dev-
 
 Transforms are Cloudinary-flavoured: `w_400,h_300,c_fill,f_webp,q_80`. Keys are `w`, `h`, `c` (`fit` or `fill`), `f` (`webp`, `jpeg`, `png`), `q`. Order does not matter; the canonical form is the cache identity.
 
-Requesting a transform that was not generated eagerly enqueues it and returns `202` with `Retry-After: 2`. The next request is a `302`.
+Delivery accepts the named presets (`sm` through `hero`) plus any transform that already exists. A preset that is not ready returns `202` with `X-Fallback-Url` and `Retry-After: 2`; the Worker serves the closest ready variant with `no-store`, and the next request after generation is a `302` to the immutable object. Anything outside the catalog returns `404` and never enqueues work.
 
 ```bash
 scripts/smoke.ps1    # end to end: upload, poll, fetch a variant, assert bytes
