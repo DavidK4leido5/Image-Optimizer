@@ -4,6 +4,8 @@ This is the path from the free-tier deployment in this repository to a full-time
 
 The short version: the current design already has the right shape. What changes is the size and redundancy of each part, plus the business features that a free tier cannot host.
 
+The diagram is committed as SVG, generated from `docs/diagrams/src/scaling-target.mmd`.
+
 ## What survives unchanged
 
 These are the decisions that make the system fast at any size. They should not be replaced during scaling.
@@ -31,48 +33,7 @@ Scaling is not one problem. Each order of magnitude hits a different limit.
 
 ## Target architecture
 
-```mermaid
-flowchart TB
-  users["Users and applications"] --> dns["Geo DNS and anycast"]
-  dns --> cdn["CDN edge<br/>cache, WAF, rate limit"]
-  cdn -->|hit| users
-  cdn -->|miss| shield["Origin shield<br/>tiered cache"]
-
-  subgraph regionA["Primary region"]
-    api["API, stateless<br/>autoscaled"]
-    q["Queue<br/>SQS or Kafka"]
-    workers["Transform workers<br/>autoscale on queue depth"]
-    pg[("Postgres primary<br/>Multi-AZ")]
-    redis[("Redis<br/>metadata and negative cache")]
-    store[("Object storage<br/>S3 or R2")]
-  end
-
-  subgraph regionB["Secondary region"]
-    apiB["API, stateless"]
-    pgB[("Read replica")]
-    storeB[("Replicated bucket")]
-  end
-
-  obs["OTel, Prometheus, Grafana"]
-
-  shield --> api
-  shield --> store
-  api --> pg
-  api --> redis
-  api --> q
-  api --> store
-  q --> workers
-  workers --> store
-  workers --> pg
-  workers --> redis
-  pg --> pgB
-  store --> storeB
-  pgB --> apiB
-  storeB --> shield
-  api -.-> obs
-  workers -.-> obs
-  cdn -.-> obs
-```
+![Target architecture: CDN, origin shield, API, queue, workers, Postgres, storage](docs/diagrams/scaling-target.svg)
 
 Reads terminate at the edge. A miss goes through an origin shield, which collapses many edge misses into one origin request per object per region. Writes go to the API, then the queue, then a worker. Storage is the only place image bytes live.
 

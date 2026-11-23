@@ -1,0 +1,40 @@
+flowchart TB
+  users["Users and applications"] --> dns["Geo DNS and anycast"]
+  dns --> cdn["CDN edge<br/>cache, WAF, rate limit"]
+  cdn -->|hit| users
+  cdn -->|miss| shield["Origin shield<br/>tiered cache"]
+
+  subgraph regionA["Primary region"]
+    api["API, stateless<br/>autoscaled"]
+    q["Queue<br/>SQS or Kafka"]
+    workers["Transform workers<br/>autoscale on queue depth"]
+    pg[("Postgres primary<br/>Multi-AZ")]
+    redis[("Redis<br/>metadata and negative cache")]
+    store[("Object storage<br/>S3 or R2")]
+  end
+
+  subgraph regionB["Secondary region"]
+    apiB["API, stateless"]
+    pgB[("Read replica")]
+    storeB[("Replicated bucket")]
+  end
+
+  obs["OTel, Prometheus, Grafana"]
+
+  shield --> api
+  shield --> store
+  api --> pg
+  api --> redis
+  api --> q
+  api --> store
+  q --> workers
+  workers --> store
+  workers --> pg
+  workers --> redis
+  pg --> pgB
+  store --> storeB
+  pgB --> apiB
+  storeB --> shield
+  api -.-> obs
+  workers -.-> obs
+  cdn -.-> obs

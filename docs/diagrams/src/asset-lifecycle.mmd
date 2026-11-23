@@ -1,0 +1,9 @@
+stateDiagram-v2
+  [*] --> pending: POST /v1/assets
+  pending --> processing: complete and enqueue
+  pending --> failed: object missing or too large
+  processing --> ready: variants written
+  processing --> processing: retry, up to 3 attempts
+  processing --> failed: attempts exhausted
+  ready --> [*]: DELETE
+  failed --> [*]: DELETE

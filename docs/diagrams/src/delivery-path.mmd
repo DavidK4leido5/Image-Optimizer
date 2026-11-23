@@ -1,0 +1,27 @@
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant W as Worker
+  participant C as Edge cache
+  participant A as API
+  participant S as Storage
+
+  B->>W: GET /i/abc123/lg.webp
+  W->>C: cache.match
+  alt cached
+    C-->>W: 200, one year
+    W-->>B: 200
+  else miss
+    W->>A: GET /i/abc123/lg.webp
+    alt exact variant exists
+      A-->>W: 302 to the object
+      W->>S: GET object
+      W->>C: put, one year immutable
+      W-->>B: 200
+    else preset missing
+      A->>A: enqueue one on-demand job
+      A-->>W: 202 with X-Fallback-Url
+      W->>S: GET the closest ready variant
+      W-->>B: 200, no-store
+    end
+  end

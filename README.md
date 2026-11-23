@@ -41,53 +41,13 @@ The split is not decoration. The API is tiny and latency-sensitive. The processo
 
 ## Architecture in detail
 
-The diagram at the top is the system in one glance. This section is the same system at the level of protocols, tables, and failure modes.
+The diagram at the top is the system in one glance. This section is the same system at the level of protocols, tables, and failure modes. Diagrams are committed as SVG, generated from the editable sources in `docs/diagrams/src`, so any client renders them without a Mermaid runtime.
 
 The through-line is the same one Cloudinary, imgix, and every serious image service use: **compute once, write an immutable object, cache the URL forever, and never resize on the read path**. Free tiers only change the size of the machinery, not the shape of the design.
 
 ### System map
 
-```mermaid
-flowchart LR
-  subgraph client["Client"]
-    web["Operator console<br/>GitHub Pages"]
-  end
-
-  subgraph edge["Cloudflare edge, free plan"]
-    worker["Worker<br/>cloudinary-delivery"]
-    cache[("Cache<br/>per data center")]
-  end
-
-  subgraph render["Render, free plan"]
-    api["API<br/>control plane"]
-    proc["Processor<br/>data plane"]
-  end
-
-  subgraph supabase["Supabase, free plan"]
-    pg[("Postgres<br/>assets, variants, jobs")]
-    s3[("Storage<br/>images bucket")]
-  end
-
-  graf["Grafana Cloud<br/>OTLP and Prometheus"]
-
-  web -->|"POST /v1/assets"| api
-  api -->|"presigned PUT"| web
-  web -->|"PUT bytes, direct"| s3
-  web -->|"POST /complete"| api
-  api -->|"insert job"| pg
-  api -->|"POST /wake"| proc
-  proc -->|"claim with SKIP LOCKED"| pg
-  proc -->|"GET original"| s3
-  proc -->|"PUT variants"| s3
-  proc -->|"insert variants"| pg
-  web -->|"GET /i/id/preset.webp"| worker
-  worker -->|"cache miss"| api
-  api -->|"302 to exact object"| worker
-  worker -->|"GET object"| s3
-  worker --- cache
-  api -.->|"OTLP"| graf
-  proc -.->|"OTLP"| graf
-```
+![System map: console, CDN, API, processor, Postgres, storage, Grafana](docs/diagrams/system-map.svg)
 
 Who calls whom, and with what credential:
 
@@ -106,33 +66,7 @@ The processor has no public route. Render only exposes the API and the Worker. T
 
 ### Upload path
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant B as Browser
-  participant A as API
-  participant P as Postgres
-  participant S as Storage
-  participant W as Processor
-
-  B->>A: POST /v1/assets with name, type, bytes
-  A->>P: insert asset, status pending
-  A->>S: presign PUT, 10 minute expiry
-  A-->>B: 201 with publicId and upload target
-  B->>S: PUT the bytes directly
-  B->>A: POST /v1/assets/{id}/complete
-  A->>S: HEAD the object for its real size
-  A->>P: status processing, insert job
-  A->>W: POST /wake, fire and forget
-  A-->>B: 202 processing
-  W->>P: claim one job with FOR UPDATE SKIP LOCKED
-  W->>S: GET original once
-  W->>W: scaled decode, orient, resize, encode
-  W->>S: PUT three variants under deterministic keys
-  W->>P: insert variants, status ready, delete job
-  B->>A: GET /v1/assets every 5 seconds
-  A-->>B: ready with variant URLs
-```
+![Upload path: presign, direct PUT, complete, queue, worker, poll](docs/diagrams/upload-path.svg)
 
 Three details make this survive a 0.1 CPU worker:
 
@@ -142,35 +76,7 @@ Three details make this survive a 0.1 CPU worker:
 
 ### Delivery path, including lazy presets
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant B as Browser
-  participant W as Worker
-  participant C as Edge cache
-  participant A as API
-  participant S as Storage
-
-  B->>W: GET /i/abc123/lg.webp
-  W->>C: cache.match
-  alt cached
-    C-->>W: 200, one year
-    W-->>B: 200
-  else miss
-    W->>A: GET /i/abc123/lg.webp
-    alt exact variant exists
-      A-->>W: 302 to the object
-      W->>S: GET object
-      W->>C: put, one year immutable
-      W-->>B: 200
-    else preset missing
-      A->>A: enqueue one on-demand job
-      A-->>W: 202 with X-Fallback-Url
-      W->>S: GET the closest ready variant
-      W-->>B: 200, no-store
-    end
-  end
-```
+![Delivery path: cache hit, exact variant, lazy preset fallback](docs/diagrams/delivery-path.svg)
 
 The public delivery surface is a **closed catalog**, not a resize API. Nine presets are generated on first request; `3xl` already exists because it matches the eager 1600 variant.
 
@@ -187,46 +93,7 @@ Arbitrary transforms (`w_1234`) return 404. Existing eager variant URLs still re
 
 ### Data model
 
-```mermaid
-erDiagram
-  assets ||--o{ variants : has
-  assets ||--o{ jobs : queues
-
-  assets {
-    uuid id PK
-    text public_id UK
-    text original_key
-    text content_type
-    bigint bytes
-    int width
-    int height
-    text status
-    text error
-    text transforms
-    timestamptz created_at
-  }
-
-  variants {
-    uuid asset_id PK
-    text transform PK
-    text object_key
-    int width
-    int height
-    bigint bytes
-    text format
-  }
-
-  jobs {
-    bigint id PK
-    uuid asset_id FK
-    text transforms
-    int attempts
-    timestamptz next_run_at
-    timestamptz lease_until
-    text last_error
-    timestamptz created_at
-  }
-```
+![Data model: assets, variants, jobs](docs/diagrams/data-model.svg)
 
 `variants` is keyed by `(asset_id, transform)`, so re-running a job upserts instead of duplicating. Both child tables cascade on delete. `transforms` is a `text[]` on purpose: one job can carry several sizes and the worker writes them in one pass.
 
@@ -234,17 +101,7 @@ RLS is enabled on all three tables with no policies. A Supabase anon key sees no
 
 ### Asset lifecycle
 
-```mermaid
-stateDiagram-v2
-  [*] --> pending: POST /v1/assets
-  pending --> processing: complete and enqueue
-  pending --> failed: object missing or too large
-  processing --> ready: variants written
-  processing --> processing: retry, up to 3 attempts
-  processing --> failed: attempts exhausted
-  ready --> [*]: DELETE
-  failed --> [*]: DELETE
-```
+![Asset lifecycle: pending, processing, ready, failed](docs/diagrams/asset-lifecycle.svg)
 
 A job that fails three times is abandoned and the asset is marked `failed` with the decoder's error, which the console shows on the card and in the drawer. A retry never leaves a half-written variant behind, because keys are derived from the transform, not from time.
 
@@ -445,4 +302,4 @@ In the console, set the API base to the Render URL, the key, and the CDN base to
 dotnet test CloudinaryClone.slnx
 ```
 
-22 tests: canonical transform and hashing, connection-string parsing, target-size math, cover-crop geometry, EXIF orientation mapping, and WebP encoding.
+29 tests: canonical transform and hashing, preset catalog uniqueness and round-trips, connection-string parsing, target-size math, cover-crop geometry, EXIF orientation mapping, and WebP encoding.

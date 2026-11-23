@@ -1,0 +1,38 @@
+erDiagram
+  assets ||--o{ variants : has
+  assets ||--o{ jobs : queues
+
+  assets {
+    uuid id PK
+    text public_id UK
+    text original_key
+    text content_type
+    bigint bytes
+    int width
+    int height
+    text status
+    text error
+    text transforms
+    timestamptz created_at
+  }
+
+  variants {
+    uuid asset_id PK
+    text transform PK
+    text object_key
+    int width
+    int height
+    bigint bytes
+    text format
+  }
+
+  jobs {
+    bigint id PK
+    uuid asset_id FK
+    text transforms
+    int attempts
+    timestamptz next_run_at
+    timestamptz lease_until
+    text last_error
+    timestamptz created_at
+  }

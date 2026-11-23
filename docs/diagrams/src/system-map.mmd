@@ -1,0 +1,39 @@
+flowchart LR
+  subgraph client["Client"]
+    web["Operator console<br/>GitHub Pages"]
+  end
+
+  subgraph edge["Cloudflare edge, free plan"]
+    worker["Worker<br/>cloudinary-delivery"]
+    cache[("Cache<br/>per data center")]
+  end
+
+  subgraph render["Render, free plan"]
+    api["API<br/>control plane"]
+    proc["Processor<br/>data plane"]
+  end
+
+  subgraph supabase["Supabase, free plan"]
+    pg[("Postgres<br/>assets, variants, jobs")]
+    s3[("Storage<br/>images bucket")]
+  end
+
+  graf["Grafana Cloud<br/>OTLP and Prometheus"]
+
+  web -->|"POST /v1/assets"| api
+  api -->|"presigned PUT"| web
+  web -->|"PUT bytes, direct"| s3
+  web -->|"POST /complete"| api
+  api -->|"insert job"| pg
+  api -->|"POST /wake"| proc
+  proc -->|"claim with SKIP LOCKED"| pg
+  proc -->|"GET original"| s3
+  proc -->|"PUT variants"| s3
+  proc -->|"insert variants"| pg
+  web -->|"GET /i/id/preset.webp"| worker
+  worker -->|"cache miss"| api
+  api -->|"302 to exact object"| worker
+  worker -->|"GET object"| s3
+  worker --- cache
+  api -.->|"OTLP"| graf
+  proc -.->|"OTLP"| graf

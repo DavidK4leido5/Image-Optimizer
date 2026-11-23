@@ -1,0 +1,25 @@
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant A as API
+  participant P as Postgres
+  participant S as Storage
+  participant W as Processor
+
+  B->>A: POST /v1/assets with name, type, bytes
+  A->>P: insert asset, status pending
+  A->>S: presign PUT, 10 minute expiry
+  A-->>B: 201 with publicId and upload target
+  B->>S: PUT the bytes directly
+  B->>A: POST /v1/assets/{id}/complete
+  A->>S: HEAD the object for its real size
+  A->>P: status processing, insert job
+  A->>W: POST /wake, fire and forget
+  A-->>B: 202 processing
+  W->>P: claim one job with FOR UPDATE SKIP LOCKED
+  W->>S: GET original once
+  W->>W: scaled decode, orient, resize, encode
+  W->>S: PUT three variants under deterministic keys
+  W->>P: insert variants, status ready, delete job
+  B->>A: GET /v1/assets every 5 seconds
+  A-->>B: ready with variant URLs
