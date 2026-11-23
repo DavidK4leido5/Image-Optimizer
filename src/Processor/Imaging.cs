@@ -8,22 +8,26 @@ public static class Imaging
 {
     public static (int Width, int Height) TargetSize(int sourceWidth, int sourceHeight, Transform t)
     {
+        // Never upscale: a 200px source should not be blown up to a 1600px variant.
         if (t.W is int w && t.H is int h)
         {
-            if (t.C == "fill") return (w, h);
+            var cappedWidth = Math.Min(w, sourceWidth);
+            var cappedHeight = Math.Min(h, sourceHeight);
+            if (t.C == "fill") return (cappedWidth, cappedHeight);
 
-            var scale = Math.Min(w / (double)sourceWidth, h / (double)sourceHeight);
+            var scale = Math.Min(cappedWidth / (double)sourceWidth, cappedHeight / (double)sourceHeight);
             return (Math.Max(1, (int)Math.Round(sourceWidth * scale)), Math.Max(1, (int)Math.Round(sourceHeight * scale)));
         }
 
         if (t.W is int onlyWidth)
         {
-            var height = Math.Max(1, (int)Math.Round(sourceHeight * (onlyWidth / (double)sourceWidth)));
-            return (onlyWidth, height);
+            var width = Math.Min(onlyWidth, sourceWidth);
+            var height = Math.Max(1, (int)Math.Round(sourceHeight * (width / (double)sourceWidth)));
+            return (width, height);
         }
 
-        var onlyHeight = t.H!.Value;
-        return (Math.Max(1, (int)Math.Round(sourceWidth * (onlyHeight / (double)sourceHeight))), onlyHeight);
+        var heightOnly = Math.Min(t.H!.Value, sourceHeight);
+        return (Math.Max(1, (int)Math.Round(sourceWidth * (heightOnly / (double)sourceHeight))), heightOnly);
     }
 
     public static SKRect CoverRect(int sourceWidth, int sourceHeight, int targetWidth, int targetHeight)

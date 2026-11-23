@@ -18,6 +18,8 @@ var grafanaHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
 var app = builder.Build();
 await db.EnsureSchema();
 
+const int MaxQueueDepth = 50;
+
 const string AssetSelect = """
     select a.id, a.public_id, a.status, a.error, a.bytes, a.width, a.height, a.created_at,
            coalesce(json_agg(json_build_object(
@@ -105,7 +107,7 @@ app.MapPost("/v1/assets", async (CreateAssetRequest request, CancellationToken c
     });
 });
 
-app.MapPost("/v1/assets/{publicId}/complete", async (string publicId, CancellationToken ct) =>
+app.MapPost("/v1/assets/{publicId}/complete", async (string publicId, HttpContext http, CancellationToken ct) =>
 {
     var asset = await Sql.QueryOne(db.Source, """
         select id, original_key, status, transforms from assets where public_id = @public
@@ -126,6 +128,14 @@ app.MapPost("/v1/assets/{publicId}/complete", async (string publicId, Cancellati
         await store.Delete(asset.OriginalKey);
         await Sql.Exec(db.Source, "update assets set status = 'failed', error = 'file too large' where id = @id", ct, ("id", asset.Id));
         return Results.Json(new { error = "file exceeds MAX_UPLOAD_BYTES" }, statusCode: 413);
+    }
+
+    // Backpressure: one worker on 0.1 CPU cannot drain an unbounded queue.
+    var depth = await Sql.QueryOne(db.Source, "select count(*)::int from jobs", ct, r => r.GetInt32(0));
+    if (depth >= MaxQueueDepth)
+    {
+        http.Response.Headers.RetryAfter = "10";
+        return Results.Json(new { error = "queue is full, retry shortly", depth }, statusCode: 429);
     }
 
     await Sql.Exec(db.Source, "update assets set bytes = @bytes, status = 'processing' where id = @id", ct,

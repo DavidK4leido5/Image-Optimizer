@@ -30,6 +30,30 @@ public class ImagingTests
         Assert.Equal((300, 300), Imaging.TargetSize(1200, 800, Fill));
 
     [Fact]
+    public void Scaled_decode_stays_at_or_above_the_target()
+    {
+        using var bitmap = new SKBitmap(6000, 4000);
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 80);
+        using var codec = SKCodec.Create(new MemoryStream(data.ToArray()));
+
+        var size = codec.GetScaledDimensions(1600f / 6000f);
+        if (Math.Max(size.Width, size.Height) < 1600)
+            size = codec.GetScaledDimensions(3200f / 6000f);
+
+        Assert.True(Math.Max(size.Width, size.Height) >= 1600,
+            $"scaled decode returned {size.Width}px for a 1600px target");
+    }
+
+    [Fact]
+    public void Never_upscales_small_sources()
+    {
+        var wide = Transform.Parse("w_800,c_fit,f_webp");
+        Assert.Equal((400, 300), Imaging.TargetSize(400, 300, wide));
+        Assert.Equal((100, 100), Imaging.TargetSize(100, 100, Fill));
+    }
+
+    [Fact]
     public void Cover_rect_uses_short_side()
     {
         var rect = Imaging.CoverRect(1200, 800, 300, 300);

@@ -47,6 +47,37 @@ public sealed class TransformWorker(
         }
     }
 
+    /// <summary>Decode straight to the largest variant we need, not the full resolution.</summary>
+    static SKBitmap Decode(SKCodec codec, int maxEdge)
+    {
+        var info = codec.Info;
+        var longest = Math.Max(info.Width, info.Height);
+
+        if (maxEdge <= 0 || longest <= maxEdge)
+            return SKBitmap.Decode(codec) ?? throw new InvalidOperationException("decode failed");
+
+        // Skia rounds the scale down, so ask for the next supported step up rather than
+        // decoding smaller than the largest variant we need.
+        var size = codec.GetScaledDimensions((float)maxEdge / longest);
+        if (Math.Max(size.Width, size.Height) < maxEdge)
+            size = codec.GetScaledDimensions(Math.Min(1f, 2f * maxEdge / longest));
+
+        if (Math.Max(size.Width, size.Height) >= longest)
+            return SKBitmap.Decode(codec) ?? throw new InvalidOperationException("decode failed");
+
+        var target = new SKImageInfo(size.Width, size.Height, info.ColorType, info.AlphaType, info.ColorSpace);
+        var bitmap = new SKBitmap(target);
+
+        var result = codec.GetPixels(target, bitmap.GetPixels());
+        if (result is not (SKCodecResult.Success or SKCodecResult.IncompleteInput))
+        {
+            bitmap.Dispose();
+            throw new InvalidOperationException($"scaled decode failed: {result}");
+        }
+
+        return bitmap;
+    }
+
     async Task Run(Job job, CancellationToken ct)
     {
         try
@@ -70,12 +101,24 @@ public sealed class TransformWorker(
                 throw new InvalidOperationException(
                     $"image is {codec.Info.Width}x{codec.Info.Height}, over the {MaxPixels} pixel cap");
 
-            using var decoded = SKBitmap.Decode(codec) ?? throw new InvalidOperationException("decode failed");
-            using var image = Imaging.Orient(decoded, codec.EncodedOrigin);
+            // Smallest variants first, so the gallery has a thumbnail before the big encodes finish.
+            var transforms = job.Transforms
+                .Select(Transform.Parse)
+                .OrderBy(t => (t.W ?? 0) * (t.H ?? 0))
+                .ToArray();
 
-            foreach (var raw in job.Transforms)
+            var maxEdge = transforms.Select(t => Math.Max(t.W ?? 0, t.H ?? 0)).DefaultIfEmpty(0).Max();
+            using var decoded = Decode(codec, maxEdge);
+
+            // Copy only when EXIF rotation actually requires it.
+            using var rotated = codec.EncodedOrigin is SKEncodedOrigin.TopLeft or SKEncodedOrigin.Default
+                ? null
+                : Imaging.Orient(decoded, codec.EncodedOrigin);
+            var image = rotated ?? decoded;
+
+            foreach (var transform in transforms)
             {
-                var transform = Transform.Parse(raw);
+                var (variantWidth, variantHeight) = Imaging.TargetSize(image.Width, image.Height, transform);
                 var bytes = Imaging.Render(image, transform);
                 var key = $"v1/{job.AssetId:N}/{transform.Hash}.{transform.Extension}";
 
@@ -89,13 +132,18 @@ public sealed class TransformWorker(
                         bytes = excluded.bytes, format = excluded.format
                     """, ct,
                     ("id", job.AssetId), ("transform", transform.Canonical), ("key", key),
-                    ("width", (object?)transform.W ?? DBNull.Value), ("height", (object?)transform.H ?? DBNull.Value),
+                    ("width", variantWidth), ("height", variantHeight),
                     ("bytes", bytes.LongLength), ("format", transform.F));
             }
 
+            // Report the encoded source dimensions, not the scaled decode size.
+            var swap = codec.EncodedOrigin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop
+                or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;
+
             await Sql.Exec(db.Source, """
                 update assets set status = 'ready', error = null, width = @width, height = @height where id = @id
-                """, ct, ("width", image.Width), ("height", image.Height), ("id", job.AssetId));
+                """, ct, ("width", swap ? codec.Info.Height : codec.Info.Width),
+                ("height", swap ? codec.Info.Width : codec.Info.Height), ("id", job.AssetId));
 
             await Jobs.Done(db.Source, job.Id, ct);
             log.LogInformation("asset {AssetId} ready ({Variants} variants)", job.AssetId, job.Transforms.Length);
