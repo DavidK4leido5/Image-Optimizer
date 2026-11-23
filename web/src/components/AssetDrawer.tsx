@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import { formatBytes, formatDate } from '../format';
 import type { Asset, Variant } from '../types';
+import { ResponsivePresets } from './ResponsivePresets';
 
 export type AssetDrawerProps = {
   asset: Asset | null;
@@ -155,6 +156,8 @@ export function AssetDrawer(props: AssetDrawerProps): JSX.Element {
               <dt>variants</dt>
               <dd>{asset.variants.length}</dd>
             </dl>
+
+            <ResponsivePresets publicId={asset.publicId} imageBase={imageBase} onCopy={onCopy} />
 
             {asset.status === 'failed' && (
               <p className="drawer__warning">{asset.error ?? 'processing failed'}</p>

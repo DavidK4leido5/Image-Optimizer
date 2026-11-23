@@ -15,6 +15,7 @@ var db = Db.Create(cfg.DatabaseUrl);
 var store = new BlobStore(StorageOptions.FromEnvironment());
 var wakeHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
 var grafanaHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+var purgeHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(6) };
 
 var app = builder.Build();
 await db.EnsureSchema();
@@ -168,36 +169,54 @@ app.MapDelete("/v1/assets/{publicId}", async (string publicId, CancellationToken
 
     if (asset is null) return Results.NotFound();
 
-    var variants = await Sql.Query(db.Source, "select object_key from variants where asset_id = @id", ct,
-        r => r.GetString(0), ("id", asset.Id));
+    var variants = await Sql.Query(db.Source, "select object_key, transform from variants where asset_id = @id", ct,
+        r => (Key: r.GetString(0), Transform: r.GetString(1)), ("id", asset.Id));
 
-    foreach (var key in variants.Append(asset.Key))
-        await store.Delete(key);
+    foreach (var variant in variants.Append((Key: asset.Key, Transform: string.Empty)))
+        await store.Delete(variant.Key);
 
     await Sql.Exec(db.Source, "delete from assets where id = @id", ct, ("id", asset.Id));
+
+    await CdnPurge.Purge(purgeHttp, cfg, app.Logger, publicId, variants.Select(v => v.Transform), ct);
     return Results.NoContent();
 });
 
 // Delivery hop. The Worker fronts this in production; locally the browser hits it directly.
+// Named presets generate on demand. Arbitrary transforms are served only if they already exist.
 app.MapGet("/i/{publicId}/{spec}", async (string publicId, string spec, HttpContext http, CancellationToken ct) =>
 {
     var (raw, extension) = SplitSpec(spec);
+    var preset = Presets.Find(raw);
+
     Transform transform;
-    try
+    if (preset is not null)
     {
-        transform = Transform.Parse(raw);
-        if (extension is not null) transform = transform with { F = extension };
+        transform = preset.Transform;
+        if (extension is not null && !string.Equals(extension, transform.Extension, StringComparison.OrdinalIgnoreCase))
+            return Results.NotFound();
     }
-    catch (FormatException ex)
+    else
     {
-        return Results.BadRequest(new { error = ex.Message });
+        try
+        {
+            transform = Transform.Parse(raw);
+            if (extension is not null) transform = transform with { F = extension };
+        }
+        catch (FormatException)
+        {
+            return Results.NotFound();
+        }
     }
 
+    var asset = await Sql.QueryOne(db.Source, """
+        select id, original_key, status from assets where public_id = @public
+        """, ct, r => new DeliveryAsset(r.GetGuid(0), r.GetString(1), r.GetString(2)), ("public", publicId));
+
+    if (asset is null || asset.Status == "failed") return Results.NotFound();
+
     var key = await Sql.QueryOne(db.Source, """
-        select v.object_key
-        from variants v join assets a on a.id = v.asset_id
-        where a.public_id = @public and v.transform = @transform
-        """, ct, r => r.GetString(0), ("public", publicId), ("transform", transform.Canonical));
+        select object_key from variants where asset_id = @id and transform = @transform
+        """, ct, r => r.GetString(0), ("id", asset.Id), ("transform", transform.Canonical));
 
     if (key is not null)
     {
@@ -205,16 +224,30 @@ app.MapGet("/i/{publicId}/{spec}", async (string publicId, string spec, HttpCont
         return Results.Redirect(store.PublicUrl(key));
     }
 
-    var ids = await Sql.Query(db.Source, "select id from assets where public_id = @public", ct,
-        r => r.GetGuid(0), ("public", publicId));
+    // Never generate a size the caller invented; only the catalog is allowed to enqueue work.
+    if (preset is null) return Results.NotFound();
 
-    if (ids.Count == 0) return Results.NotFound();
-
-    await Jobs.EnqueueOnDemand(db.Source, ids[0], transform.Canonical, ct);
+    await Jobs.EnqueueOnDemand(db.Source, asset.Id, transform.Canonical, ct);
     Wake(cfg, wakeHttp, app.Logger);
+
+    if (http.Request.Query["json"] == "1")
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        http.Response.Headers.RetryAfter = "2";
+        return Results.Json(new { status = "processing", preset = preset.Name, transform = transform.Canonical }, statusCode: 202);
+    }
+
+    // Show the closest ready variant while the exact preset builds. The Worker will not cache this.
+    var fallback = await Sql.QueryOne(db.Source, """
+        select object_key from variants
+        where asset_id = @id
+        order by abs(coalesce(width, 0) - @width)
+        limit 1
+        """, ct, r => r.GetString(0), ("id", asset.Id), ("width", transform.W ?? 0));
+
     http.Response.Headers.CacheControl = "no-store";
-    http.Response.Headers.RetryAfter = "2";
-    return Results.Json(new { status = "processing", transform = transform.Canonical }, statusCode: 202);
+    http.Response.Headers["X-Fallback"] = "1";
+    return Results.Redirect(store.PublicUrl(fallback ?? asset.OriginalKey));
 });
 
 // Free-tier usage that we can measure with the credentials we already have.
@@ -345,6 +378,8 @@ static void Wake(AppConfig cfg, HttpClient http, ILogger logger)
 }
 
 sealed record Usage(int Count, long Bytes);
+
+sealed record DeliveryAsset(Guid Id, string OriginalKey, string Status);
 
 sealed record CreateAssetRequest(string? FileName, string? ContentType, long Bytes, string[]? Transforms);
 

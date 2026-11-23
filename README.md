@@ -143,7 +143,21 @@ cd delivery
 npx wrangler deploy
 ```
 
-Set `ORIGIN` in `wrangler.toml` to the API URL. Image URLs then look like `https://<worker>.<subdomain>.workers.dev/i/<id>/w_800,c_fit,f_webp,q_80.webp` and the worker caches the bytes per colo. No custom domain needed, which is the point: a free `workers.dev` hostname is a real HTTPS CDN endpoint.
+Set `ORIGIN` in `wrangler.toml` to the API URL. No custom domain needed, which is the point: a free `workers.dev` hostname is a real HTTPS CDN endpoint.
+
+Delivery uses a closed set of named presets, so a caller cannot invent a size:
+
+| Preset | Size | Use |
+|---|---|---|
+| `sm` `md` `lg` `xl` | 320, 480, 768, 1024 wide, original ratio | `srcset` breakpoints |
+| `2xl` `3xl` `4xl` | 1280, 1600, 1920 wide, original ratio | desktop |
+| `thumb` | 160x160 fill | grid cells |
+| `card` | 480x320 fill (3:2) | cards |
+| `hero` | 1920x1080 fill (16:9) | banners |
+
+`https://<worker>/i/<id>/lg.webp` generates on the first request and is cached for a year after. While a preset builds, the api redirects to the closest ready variant with `X-Fallback: 1`; the worker returns it with `no-store` so a low-res image is never pinned under a high-res URL. Upload still creates only the three original variants.
+
+Deleting an asset can purge the CDN, but the Cloudflare purge API needs a zone. `workers.dev` URLs cannot be purged. Set `CDN_BASE_URL`, `CF_ZONE_ID`, and `CF_PURGE_TOKEN` once the worker has a custom domain; without them, delete skips the purge and logs nothing.
 
 ### 4. GitHub Pages (console)
 
