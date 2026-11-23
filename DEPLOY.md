@@ -74,19 +74,20 @@ A brand new Cloudflare account has no `workers.dev` subdomain yet, so the first 
 
 The worker only proxies GET and HEAD, caches 200 responses for a year, and leaves everything else alone. Cache hits never reach Render. They still count toward the 100k requests/day, but they cost almost no CPU.
 
-## 4. Cloudflare Pages
+## 4. GitHub Pages
 
-```bash
-npx wrangler pages deploy www --project-name image-service-dashboard
-```
+The React console in `web/` is deployed by `.github/workflows/pages.yml`.
 
-Open the Pages URL and fill in:
+1. Repo, Settings, Pages, Source: **GitHub Actions**. One time only.
+2. Push a change under `web/`, or run the `pages` workflow manually.
+
+The site lands at `https://<user>.github.io/<repo>/`. Open it and fill in:
 
 - **api base**: `https://<api>.onrender.com`
 - **api key**: the `API_KEY` from Render
 - **cdn base**: `https://cloudinary-delivery.<subdomain>.workers.dev`
 
-Values are stored in the browser's localStorage. The dashboard itself is public; the key is what gates the API.
+Values are stored in the browser's localStorage. The console itself is public; the key is what gates the API.
 
 ## 5. Verify
 
@@ -147,7 +148,7 @@ The code enables the OTLP exporter only when the endpoint variable is present.
 | Supabase Postgres | 500MB | metadata is KB per asset |
 | Render | 750 instance hours/month, sleep at 15 min | api warm, processor on demand |
 | Cloudflare Workers | 100k requests/day | cache hits skip Render; they still count toward the daily request cap |
-| Cloudflare Pages | unlimited requests | static dashboard |
+| GitHub Pages | free for public repos | React console, built by Actions |
 | GitHub Actions | 2000 min/month private | build and test |
 
 The only thing that could cost money is exceeding Supabase storage or egress, which requires roughly an order of magnitude more images than a portfolio needs.

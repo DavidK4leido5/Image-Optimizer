@@ -43,7 +43,7 @@ The split is not decoration. The API is tiny and latency-sensitive. The processo
 docker compose up -d --build
 ```
 
-Then open `www/index.html` in a browser (or serve the folder with `npx serve www` if your browser blocks cross-origin uploads from `file://`). Defaults already match the compose stack: API `http://localhost:5080`, key `dev-local-key`.
+Then open the console. For local dev: `cd web && npm install && npm run dev`, and set the api base to `http://localhost:5080` with key `dev-local-key`. The deployed console is at https://davidk4leido5.github.io/Image-Optimizer/.
 
 Upload an image. Within a couple of seconds you get three WebP variants and a delivery URL:
 
@@ -145,13 +145,11 @@ npx wrangler deploy
 
 Set `ORIGIN` in `wrangler.toml` to the API URL. Image URLs then look like `https://<worker>.<subdomain>.workers.dev/i/<id>/w_800,c_fit,f_webp,q_80.webp` and the worker caches the bytes per colo. No custom domain needed, which is the point: a free `workers.dev` hostname is a real HTTPS CDN endpoint.
 
-### 4. Cloudflare Pages (dashboard)
+### 4. GitHub Pages (console)
 
-```bash
-npx wrangler pages deploy www
-```
+The React console in `web/` deploys with the `pages` workflow. Enable it once in the repo: Settings, Pages, Source: **GitHub Actions**. After that, every push that touches `web/` builds and deploys.
 
-Set the CDN base field to the worker hostname and the API base to the Render URL.
+In the console, set the API base to the Render URL, the key, and the CDN base to the Worker hostname.
 
 ## Budget
 
@@ -161,7 +159,7 @@ Set the CDN base field to the worker hostname and the API base to the Render URL
 | Supabase Postgres | 500MB | metadata is a few KB per asset, tens of thousands fit |
 | Render | 750 instance hours, sleeps at 15 min | API warm 24/7 (~730h), processor on demand |
 | Worker | 100k requests/day | cache hits skip Render, but still count as worker requests |
-| Pages | unlimited requests | static dashboard |
+| GitHub Pages | free for public repos | React console, built by Actions |
 | GitHub Actions | 2000 min/month private | build and test |
 | Grafana Cloud | 10k series, 50GB logs | OTLP traces and metrics |
 

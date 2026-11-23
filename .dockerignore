@@ -3,7 +3,6 @@
 .git
 .github
 tests
-www
 delivery
 .env
 *.md
