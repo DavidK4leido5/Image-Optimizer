@@ -120,6 +120,7 @@
 
   async function load() {
     const response = await fetch(apiBase() + '/v1/assets', { headers: { 'X-Api-Key': apiKey() } });
+    if (response.status === 401) { status('unauthorized, set the api key', true); return false; }
     if (!response.ok) { status('list: ' + response.status, true); return false; }
     const assets = await response.json();
     render(assets);
@@ -185,6 +186,7 @@
     }
   }
 
+  for (const id of ['api', 'key', 'cdn']) el(id).addEventListener('change', load);
   el('upload').addEventListener('click', upload);
   el('refresh').addEventListener('click', load);
   load();

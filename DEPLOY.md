@@ -70,7 +70,9 @@ npx wrangler deploy
 
 Wrangler prints the URL, `https://cloudinary-delivery.<subdomain>.workers.dev`. That is your CDN. No domain, no zone, no card.
 
-The worker only proxies GET and HEAD, caches 200 responses for a year, and leaves everything else alone. Cache hits never reach Render, which is what keeps you inside the 100k requests/day.
+A brand new Cloudflare account has no `workers.dev` subdomain yet, so the first deploy stops and prints an onboarding link. Claim a subdomain there (one time), then deploy again. TLS for a new subdomain can take a few minutes to provision; until then HTTPS fails the handshake while plain HTTP already works.
+
+The worker only proxies GET and HEAD, caches 200 responses for a year, and leaves everything else alone. Cache hits never reach Render. They still count toward the 100k requests/day, but they cost almost no CPU.
 
 ## 4. Cloudflare Pages
 
@@ -144,7 +146,7 @@ The code enables the OTLP exporter only when the endpoint variable is present.
 | Supabase storage | ~1GB, a few GB egress | 600 to 900 assets with three variants |
 | Supabase Postgres | 500MB | metadata is KB per asset |
 | Render | 750 instance hours/month, sleep at 15 min | api warm, processor on demand |
-| Cloudflare Workers | 100k requests/day | cache hits cost zero |
+| Cloudflare Workers | 100k requests/day | cache hits skip Render; they still count toward the daily request cap |
 | Cloudflare Pages | unlimited requests | static dashboard |
 | GitHub Actions | 2000 min/month private | build and test |
 

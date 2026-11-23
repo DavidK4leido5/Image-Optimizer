@@ -4,7 +4,8 @@
 #>
 param(
     [string]$Api = "http://localhost:5080",
-    [string]$Key = "dev-local-key"
+    [string]$Key = "dev-local-key",
+    [int]$WaitSeconds = 90
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,8 +45,8 @@ Assert-Equal ([int]$put.StatusCode) 200 "presigned put"
 Invoke-RestMethod -Method Post -Uri "$Api/v1/assets/$($created.publicId)/complete" -Headers $headers | Out-Null
 
 $asset = $null
-foreach ($attempt in 1..30) {
-    Start-Sleep -Milliseconds 700
+foreach ($attempt in 1..$WaitSeconds) {
+    Start-Sleep -Seconds 1
     $asset = Invoke-RestMethod -Uri "$Api/v1/assets/$($created.publicId)" -Headers $headers
     if ($asset.status -in @("ready", "failed")) { break }
 }

@@ -4,4 +4,4 @@ compatibility_date = "2026-11-01"
 
 [vars]
 # local: the compose api. production: https://<your-api>.onrender.com
-ORIGIN = "http://localhost:5080"
+ORIGIN = "https://cloudinary-api-k1t3.onrender.com"

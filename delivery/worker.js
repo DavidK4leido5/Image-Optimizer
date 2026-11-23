@@ -20,7 +20,7 @@ export default {
     out.headers.set("Cache-Control", "public, max-age=31536000, immutable");
     out.headers.set("Access-Control-Allow-Origin", "*");
 
-    ctx.waitUntil(cache.put(request, out.clone()));
+    if (request.method === "GET") ctx.waitUntil(cache.put(request, out.clone()));
     return out;
   },
 };

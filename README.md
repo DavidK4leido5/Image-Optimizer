@@ -160,7 +160,7 @@ Set the CDN base field to the worker hostname and the API base to the Render URL
 | Supabase storage | ~1GB, single-digit GB egress | roughly 600 to 900 assets with three variants |
 | Supabase Postgres | 500MB | metadata is a few KB per asset, tens of thousands fit |
 | Render | 750 instance hours, sleeps at 15 min | API warm 24/7 (~730h), processor on demand |
-| Worker | 100k requests/day | cache hits do not invoke the worker at all |
+| Worker | 100k requests/day | cache hits skip Render, but still count as worker requests |
 | Pages | unlimited requests | static dashboard |
 | GitHub Actions | 2000 min/month private | build and test |
 | Grafana Cloud | 10k series, 50GB logs | OTLP traces and metrics |
