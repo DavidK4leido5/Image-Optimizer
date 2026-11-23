@@ -47,7 +47,14 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      setAssets(await listAssets());
+      const next = await listAssets();
+      setAssets(next);
+      setStatus((current) =>
+        current === 'queued, waiting for the processor' &&
+        next.every((asset) => asset.status === 'ready' || asset.status === 'failed')
+          ? ''
+          : current,
+      );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
@@ -235,7 +242,17 @@ export default function App() {
             <article className="card" key={asset.id}>
               <div className="thumb">
                 {asset.variants.length ? (
-                  <img src={imageBase + asset.variants[0].url} alt={asset.publicId} loading="lazy" />
+                  <img
+                    src={imageBase + asset.variants[0].url}
+                    alt={asset.publicId}
+                    loading="lazy"
+                    onError={(event) => {
+                      const image = event.currentTarget;
+                      if (image.dataset.retried) return;
+                      image.dataset.retried = '1';
+                      image.src = image.src.split('?')[0] + '?r=' + Date.now();
+                    }}
+                  />
                 ) : (
                   <div className="placeholder">{asset.status}</div>
                 )}
