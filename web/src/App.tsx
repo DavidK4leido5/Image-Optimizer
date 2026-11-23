@@ -3,14 +3,17 @@ import type { Asset, Point } from './api';
 import { deleteAsset, health, listAssets, loadConfig, queryMetric, saveConfig, upload } from './api';
 import { Spark } from './Spark';
 
-type Telemetry = { cpu: Point[]; heap: Point[]; rps: Point[]; p95: Point[] };
-const EMPTY: Telemetry = { cpu: [], heap: [], rps: [], p95: [] };
+type Telemetry = { cpu: Point[]; rss: Point[]; heap: Point[]; rps: Point[]; p95: Point[] };
+const EMPTY: Telemetry = { cpu: [], rss: [], heap: [], rps: [], p95: [] };
 
+// These are the names the .NET runtime meter exports through Grafana's OTel to
+// Prometheus translation, not the OpenTelemetry semconv names.
 const QUERIES = (service: string) => ({
-  cpu: 'rate(process_runtime_dotnet_cpu_time_seconds_total{service_name="' + service + '"}[2m])',
-  heap: 'process_runtime_dotnet_gc_heap_size_bytes{service_name="' + service + '"}',
-  rps: 'sum(rate(http_server_request_duration_seconds_count{service_name="' + service + '"}[2m]))',
-  p95: 'histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name="' + service + '"}[2m])))',
+  cpu: 'sum(rate(dotnet_process_cpu_time_seconds_total{service_name="' + service + '"}[2m]))',
+  rss: 'max(dotnet_process_memory_working_set_bytes{service_name="' + service + '"})',
+  heap: 'sum(dotnet_gc_last_collection_heap_size_bytes{service_name="' + service + '"})',
+  rps: 'sum(rate(http_server_request_duration_seconds_count{service_name="' + service + '"}[5m]))',
+  p95: 'histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name="' + service + '"}[5m])))',
 });
 
 function bytes(value: number): string {
@@ -71,13 +74,14 @@ export default function App() {
     const end = Math.floor(Date.now() / 1000);
     const start = end - 3600;
     try {
-      const [cpu, heap, rps, p95] = await Promise.all([
+      const [cpu, rss, heap, rps, p95] = await Promise.all([
         queryMetric(queries.cpu, start, end),
+        queryMetric(queries.rss, start, end),
         queryMetric(queries.heap, start, end),
         queryMetric(queries.rps, start, end),
         queryMetric(queries.p95, start, end),
       ]);
-      setTelemetry({ cpu, heap, rps, p95 });
+      setTelemetry({ cpu, rss, heap, rps, p95 });
       setTelemetryError('');
     } catch (error) {
       setTelemetryError(error instanceof Error ? error.message : String(error));
@@ -207,10 +211,16 @@ export default function App() {
               color="#4f8cff"
             />
             <Metric
+              title="memory (rss)"
+              value={latest(telemetry.rss) === null ? '—' : bytes(latest(telemetry.rss) as number)}
+              points={telemetry.rss}
+              color="#5ddc8a"
+            />
+            <Metric
               title="managed heap"
               value={latest(telemetry.heap) === null ? '—' : bytes(latest(telemetry.heap) as number)}
               points={telemetry.heap}
-              color="#5ddc8a"
+              color="#7ee0a3"
             />
             <Metric
               title="requests / s"
