@@ -7,7 +7,8 @@ using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceTelemetry("cloudinary-api");
-builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
+    p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod().WithExposedHeaders("Retry-After")));
 
 var cfg = AppConfig.FromEnvironment();
 var db = Db.Create(cfg.DatabaseUrl);

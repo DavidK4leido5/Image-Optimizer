@@ -1,5 +1,3 @@
-// Cache-through edge in front of the api. Cloudflare caches the bytes per colo; the
-// api only serves the first request in each colo. No transform logic lives here.
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);

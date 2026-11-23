@@ -1,5 +1,7 @@
 # Frontend spec: image optimizer console
 
+Historical spec of the pre-redesign UI. The API contracts and constraints below still apply; the interface itself was rebuilt from `web/DESIGN.md`.
+
 Current state of the UI at `web/`, deployed to GitHub Pages. This describes what exists, not what should exist. Use it as the input for a redesign.
 
 ## Product
