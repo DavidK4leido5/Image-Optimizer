@@ -78,14 +78,17 @@ Three details make this survive a 0.1 CPU worker:
 
 ![Delivery path: cache hit, exact variant, lazy preset fallback](docs/diagrams/delivery-path.svg)
 
-The public delivery surface is a **closed catalog**, not a resize API. Nine presets are generated on first request; `3xl` already exists because it matches the eager 1600 variant.
+The public delivery surface is a **closed catalog**, not a resize API. Ten presets are generated on first request; `3xl` already exists because it matches the eager 1600 variant.
 
 | Class | Presets | Generated |
 |---|---|---|
 | Eager at upload | 200 fill, 800 fit, 1600 fit | always, three objects |
 | Lazy widths | `sm` `md` `lg` `xl` `2xl` `4xl` | first request |
 | Lazy ratios | `thumb` `card` `hero` | first request |
+| Lazy padded | `poster` | first request, white bars |
 | Free by coincidence | `3xl` | already uploaded as the 1600 variant |
+
+Fill presets accept `?g=north` and friends; any preset accepts `?u=1` to allow upscaling. Both change the canonical key, so old variants stay valid.
 
 The fallback is deliberate. A first request must return pixels, not JSON, and it must not poison the cache. That is why the fallback is a `202` carrying `X-Fallback-Url`, and why the Worker answers it with `Cache-Control: no-store` and `CDN-Cache-Control: no-store`. The exact object is the only thing cached, for a year. An early attempt used a `302`; Workers followed it and cached the low-res fallback under the high-res URL, so the redirect was replaced.
 
@@ -112,7 +115,7 @@ A job that fails three times is abandoned and the asset is marked `failed` with 
 | Byte path | direct-to-object-storage uploads | presigned PUT, API stores metadata only |
 | Derivative identity | content hash, immutable key | `v1/{assetId}/{sha256(canonical)[0:16]}.{ext}` |
 | Transform surface | URL grammar plus named transformations | internal grammar, public closed presets |
-| Compute strategy | eager common sizes, lazy long tail | three eager, nine lazy |
+| Compute strategy | eager common sizes, lazy long tail | three eager, ten lazy |
 | Work distribution | durable queue, leased claims | Postgres `FOR UPDATE SKIP LOCKED`, 3 minute lease |
 | Idempotency | overwrite the same key on retry | deterministic keys and `(asset_id, transform)` upsert |
 | Backpressure | bounded queue, 429 with retry hint | depth 50, `Retry-After: 10` |
@@ -327,4 +330,4 @@ In the console, set the API base to the Render URL, the key, and the CDN base to
 dotnet test CloudinaryClone.slnx
 ```
 
-29 tests: canonical transform and hashing, preset catalog uniqueness and round-trips, connection-string parsing, target-size math, cover-crop geometry, EXIF orientation mapping, and WebP encoding.
+43 tests: canonical transform and hashing, preset catalog uniqueness and round-trips, connection-string parsing, target-size math, fill and pad geometry, gravity, the upscale flag, EXIF orientation mapping, and WebP encoding.
