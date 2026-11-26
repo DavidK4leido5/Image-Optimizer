@@ -1520,3 +1520,13 @@ button.link {
     font-size: 10px;
   }
 }
+
+.drawer__note {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.drawer__note a {
+  color: var(--accent);
+}

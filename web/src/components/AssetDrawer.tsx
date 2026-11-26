@@ -19,12 +19,20 @@ function widthOf(transform: string): number {
   return match ? Number(match[1]) : 0;
 }
 
-function largestVariant(variants: Variant[]): Variant | null {
+function largest(variants: Variant[]): Variant | null {
   return variants.reduce<Variant | null>(
-    (largest, variant) =>
-      !largest || widthOf(variant.transform) > widthOf(largest.transform) ? variant : largest,
+    (best, variant) => (!best || widthOf(variant.transform) > widthOf(best.transform) ? variant : best),
     null,
   );
+}
+
+function largestFit(variants: Variant[]): Variant | null {
+  return largest(variants.filter((variant) => variant.transform.includes('c_fit')));
+}
+
+function previewVariant(variants: Variant[]): Variant | null {
+  // The full frame is the honest preview. A crop is the fallback, not the default.
+  return largestFit(variants) ?? largest(variants);
 }
 
 export function AssetDrawer(props: AssetDrawerProps): JSX.Element {
@@ -37,7 +45,9 @@ export function AssetDrawer(props: AssetDrawerProps): JSX.Element {
   const [deleting, setDeleting] = useState(false);
   const titleId = useId();
   const descriptionId = useId();
-  const preview = asset ? largestVariant(asset.variants) : null;
+  const preview = asset ? previewVariant(asset.variants) : null;
+  const fullFrame = asset ? largestFit(asset.variants) : null;
+  const cropped = preview ? preview.transform.includes('c_fill') : false;
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -125,7 +135,7 @@ export function AssetDrawer(props: AssetDrawerProps): JSX.Element {
             </header>
 
             <p className="drawer__description" id={descriptionId}>
-              Original file, dimensions and every generated variant.
+              Original file, dimensions and every generated variant. The preview uses the full frame when one exists.
             </p>
 
             <div className="drawer__preview">
@@ -145,6 +155,21 @@ export function AssetDrawer(props: AssetDrawerProps): JSX.Element {
                 <p className="drawer__empty">no variants yet</p>
               )}
             </div>
+
+            {cropped && (
+              <p className="drawer__note">
+                This asset has no full-frame variant yet, so the preview is cropped.
+                {fullFrame && (
+                  <>
+                    {' '}
+                    <a href={imageBase + fullFrame.url} target="_blank" rel="noreferrer">
+                      See a full frame
+                    </a>
+                    .
+                  </>
+                )}
+              </p>
+            )}
 
             <dl className="drawer__meta">
               <dt>dimensions</dt>

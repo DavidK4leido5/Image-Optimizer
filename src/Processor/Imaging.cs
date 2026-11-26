@@ -11,8 +11,7 @@ public static class Imaging
         // Never upscale: a 200px source should not be blown up to a 1600px variant.
         if (t.W is int w && t.H is int h)
         {
-            var cappedWidth = Math.Min(w, sourceWidth);
-            var cappedHeight = Math.Min(h, sourceHeight);
+            if (t.C == "pad") return (w, h);
 
             if (t.C == "fill")
             {
@@ -21,7 +20,7 @@ public static class Imaging
                 return (Math.Max(1, (int)Math.Round(w * ratio)), Math.Max(1, (int)Math.Round(h * ratio)));
             }
 
-            var scale = Math.Min(cappedWidth / (double)sourceWidth, cappedHeight / (double)sourceHeight);
+            var scale = Math.Min(1d, Math.Min(w / (double)sourceWidth, h / (double)sourceHeight));
             return (Math.Max(1, (int)Math.Round(sourceWidth * scale)), Math.Max(1, (int)Math.Round(sourceHeight * scale)));
         }
 
@@ -36,21 +35,39 @@ public static class Imaging
         return (Math.Max(1, (int)Math.Round(sourceWidth * (heightOnly / (double)sourceHeight))), heightOnly);
     }
 
-    public static SKRect CoverRect(int sourceWidth, int sourceHeight, int targetWidth, int targetHeight)
+    static (int Width, int Height) FitInside(int sourceWidth, int sourceHeight, int boxWidth, int boxHeight)
+    {
+        var scale = Math.Min(1d, Math.Min(boxWidth / (double)sourceWidth, boxHeight / (double)sourceHeight));
+        return (Math.Max(1, (int)Math.Round(sourceWidth * scale)), Math.Max(1, (int)Math.Round(sourceHeight * scale)));
+    }
+
+    public static SKRect CoverRect(int sourceWidth, int sourceHeight, int targetWidth, int targetHeight,
+        string gravity = "center")
     {
         var targetRatio = targetWidth / (double)targetHeight;
         var sourceRatio = sourceWidth / (double)sourceHeight;
 
+        float width, height, left, top;
         if (sourceRatio > targetRatio)
         {
-            var width = sourceHeight * targetRatio;
-            var left = (sourceWidth - width) / 2f;
-            return new SKRect((float)left, 0, (float)(left + width), sourceHeight);
+            width = (float)(sourceHeight * targetRatio);
+            height = sourceHeight;
+            left = gravity is "west" or "northwest" or "southwest" ? 0
+                : gravity is "east" or "northeast" or "southeast" ? sourceWidth - width
+                : (sourceWidth - width) / 2f;
+            top = 0;
+        }
+        else
+        {
+            width = sourceWidth;
+            height = (float)(sourceWidth / targetRatio);
+            left = 0;
+            top = gravity is "north" or "northeast" or "northwest" ? 0
+                : gravity is "south" or "southeast" or "southwest" ? sourceHeight - height
+                : (sourceHeight - height) / 2f;
         }
 
-        var height = sourceWidth / targetRatio;
-        var top = (sourceHeight - height) / 2f;
-        return new SKRect(0, (float)top, sourceWidth, (float)(top + height));
+        return new SKRect(left, top, left + width, top + height);
     }
 
     public static byte[] Render(SKBitmap source, Transform t)
@@ -60,14 +77,22 @@ public static class Imaging
         using var output = new SKBitmap(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
         using (var canvas = new SKCanvas(output))
         {
-            canvas.Clear(SKColors.Transparent);
+            canvas.Clear(t.C == "pad" ? SKColors.White : SKColors.Transparent);
 
             var sampling = new SKSamplingOptions(SKCubicResampler.Mitchell);
             using var paint = new SKPaint { IsAntialias = true };
 
-            if (t.C == "fill")
+            if (t.C == "pad")
             {
-                var crop = CoverRect(source.Width, source.Height, width, height);
+                var (innerWidth, innerHeight) = FitInside(source.Width, source.Height, width, height);
+                var left = (width - innerWidth) / 2f;
+                var top = (height - innerHeight) / 2f;
+                canvas.DrawBitmap(source, new SKRect(0, 0, source.Width, source.Height),
+                    new SKRect(left, top, left + innerWidth, top + innerHeight), sampling, paint);
+            }
+            else if (t.C == "fill")
+            {
+                var crop = CoverRect(source.Width, source.Height, width, height, t.G);
                 canvas.DrawBitmap(source, crop, new SKRect(0, 0, width, height), sampling, paint);
             }
             else

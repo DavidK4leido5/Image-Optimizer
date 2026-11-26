@@ -18,7 +18,8 @@ const encodeUrl = (url: string) => url.replace(/,/g, '%2C');
 export function AssetCard({ asset, imageBase, onOpen }: Props) {
   const ordered = [...asset.variants].sort((a, b) => widthOf(a.transform) - widthOf(b.transform));
   const smallest = ordered[0];
-  const src = smallest ? encodeUrl(imageBase + smallest.url) : '';
+  const fallback = ordered.find((variant) => variant.transform.includes('c_fit')) ?? smallest;
+  const src = fallback ? encodeUrl(imageBase + fallback.url) : '';
   // Only fit variants: ratio crops would change framing between breakpoints.
   const srcSet = ordered
     .filter((variant) => variant.transform.includes('c_fit') && widthOf(variant.transform) > 0)

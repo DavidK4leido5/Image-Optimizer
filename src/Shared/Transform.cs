@@ -3,14 +3,20 @@ using System.Text;
 
 namespace CloudinaryClone.Shared;
 
-/// <summary>Canonical transform spec, Cloudinary-style: w_400,h_300,c_fill,f_webp,q_80.</summary>
-public sealed record Transform(int? W, int? H, string C, string F, int Q)
+/// <summary>Canonical transform spec, Cloudinary-style: w_400,h_300,c_fill,g_north,f_webp,q_80.</summary>
+public sealed record Transform(int? W, int? H, string C, string F, int Q, string G = "center")
 {
     public static readonly string[] Defaults =
     [
         "w_200,h_200,c_fill,f_webp,q_80",
         "w_800,c_fit,f_webp,q_80",
         "w_1600,c_fit,f_webp,q_82",
+    ];
+
+    static readonly string[] Gravities =
+    [
+        "center", "north", "south", "east", "west",
+        "northeast", "northwest", "southeast", "southwest",
     ];
 
     public static Transform Parse(string raw)
@@ -20,6 +26,7 @@ public sealed record Transform(int? W, int? H, string C, string F, int Q)
         int? w = null, h = null, q = null;
         var c = "fit";
         var f = "webp";
+        var g = "center";
 
         foreach (var part in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
@@ -32,8 +39,14 @@ public sealed record Transform(int? W, int? H, string C, string F, int Q)
                 case "h": h = Int(kv[1], 1, 8000, "h"); break;
                 case "q": q = Int(kv[1], 1, 100, "q"); break;
                 case "c":
-                    if (kv[1] is not ("fit" or "fill")) throw new FormatException("c must be fit or fill");
+                    if (kv[1] is not ("fit" or "fill" or "pad"))
+                        throw new FormatException("c must be fit, fill or pad");
                     c = kv[1];
+                    break;
+                case "g":
+                    if (!Gravities.Contains(kv[1]))
+                        throw new FormatException("g must be center, north, south, east, west or a corner");
+                    g = kv[1];
                     break;
                 case "f":
                     if (kv[1] is not ("webp" or "jpeg" or "png"))
@@ -46,7 +59,9 @@ public sealed record Transform(int? W, int? H, string C, string F, int Q)
         }
 
         if (w is null && h is null) throw new FormatException("w or h is required");
-        return new Transform(w, h, c, f, q ?? 80);
+        if (g != "center" && c != "fill") throw new FormatException("g requires c_fill");
+        if (c == "pad" && (w is null || h is null)) throw new FormatException("c_pad requires both w and h");
+        return new Transform(w, h, c, f, q ?? 80, g);
     }
 
     /// <summary>Fixed parameter order, defaults filled in. This string is the cache identity.</summary>
@@ -65,6 +80,7 @@ public sealed record Transform(int? W, int? H, string C, string F, int Q)
             Add("w", W);
             Add("h", H);
             Add("c", C);
+            Add("g", G == "center" ? null : G);
             Add("f", F);
             Add("q", Q);
             return sb.ToString();

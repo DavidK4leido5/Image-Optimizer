@@ -64,6 +64,35 @@ public class ImagingTests
     }
 
     [Fact]
+    public void Cover_rect_honours_gravity()
+    {
+        var east = Imaging.CoverRect(1200, 800, 300, 300, "east");
+        Assert.Equal(400f, east.Left);
+        Assert.Equal(0f, east.Top);
+        Assert.Equal(800f, east.Width);
+
+        var south = Imaging.CoverRect(800, 1200, 300, 300, "south");
+        Assert.Equal(0f, south.Left);
+        Assert.Equal(400f, south.Top);
+        Assert.Equal(800f, south.Height);
+    }
+
+    [Fact]
+    public void Pad_letterboxes_with_white()
+    {
+        using var source = new SKBitmap(4, 2);
+        using (var canvas = new SKCanvas(source)) canvas.Clear(SKColors.Red);
+
+        var bytes = Imaging.Render(source, Transform.Parse("w_8,h_8,c_pad,f_png"));
+        using var decoded = SKBitmap.Decode(bytes);
+
+        Assert.Equal(8, decoded.Width);
+        Assert.Equal(8, decoded.Height);
+        Assert.Equal(SKColors.White, decoded.GetPixel(0, 0));
+        Assert.Equal(SKColors.Red, decoded.GetPixel(4, 4));
+    }
+
+    [Fact]
     public void Cover_rect_uses_short_side()
     {
         var rect = Imaging.CoverRect(1200, 800, 300, 300);

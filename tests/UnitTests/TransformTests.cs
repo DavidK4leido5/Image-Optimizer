@@ -10,6 +10,9 @@ public class TransformTests
     [InlineData("w_200,c_fill", "w_200,c_fill,f_webp,q_80")]
     [InlineData("w_800,f_png,q_60", "w_800,c_fit,f_png,q_60")]
     [InlineData("w_400,h_300,c_fill,f_webp,q_80", "w_400,h_300,c_fill,f_webp,q_80")]
+    [InlineData("w_300,h_300,c_fill,g_north", "w_300,h_300,c_fill,g_north,f_webp,q_80")]
+    [InlineData("w_300,h_300,c_fill,g_center", "w_300,h_300,c_fill,f_webp,q_80")]
+    [InlineData("w_300,h_300,c_pad", "w_300,h_300,c_pad,f_webp,q_80")]
     public void Canonicalises(string input, string expected) =>
         Assert.Equal(expected, Transform.Parse(input).Canonical);
 
@@ -31,6 +34,9 @@ public class TransformTests
     [InlineData("w_200,f_gif")]
     [InlineData("z_1")]
     [InlineData("w")]
+    [InlineData("w_300,c_fit,g_north")]
+    [InlineData("w_300,c_pad")]
+    [InlineData("w_300,h_300,c_fill,g_auto")]
     public void Rejects(string input) =>
         Assert.Throws<FormatException>(() => Transform.Parse(input));
 

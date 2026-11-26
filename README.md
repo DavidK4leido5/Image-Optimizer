@@ -207,7 +207,15 @@ curl -s http://localhost:5080/v1/assets -H 'X-Api-Key: dev-local-key'
 curl -s -X DELETE http://localhost:5080/v1/assets/<publicId> -H 'X-Api-Key: dev-local-key'
 ```
 
-Transforms are Cloudinary-flavoured: `w_400,h_300,c_fill,f_webp,q_80`. Keys are `w`, `h`, `c` (`fit` or `fill`), `f` (`webp`, `jpeg`, `png`), `q`. Order does not matter; the canonical form is the cache identity.
+Transforms are Cloudinary-flavoured: `w_400,h_300,c_fill,g_north,f_webp,q_80`. Keys are `w`, `h`, `c` (`fit`, `fill`, `pad`), `g` (crop anchor for fill: `center` by default, plus `north`, `south`, `east`, `west`, and the four corners), `f` (`webp`, `jpeg`, `png`), `q`. Order does not matter; the canonical form is the cache identity.
+
+The cheap version of Cloudinary's crop semantics, no saliency or face detection:
+
+- `c_fit` keeps the whole frame and never upscales.
+- `c_fill` crops to the box. Gravity picks the anchor, so `g_north` keeps the top and `g_east` keeps the right edge.
+- `c_pad` fits the frame inside the box and letterboxes the rest in white.
+
+Width presets use `fit`. `thumb`, `card`, and `hero` use `fill` with center gravity, so they are cropped by definition. The console previews the largest fit variant and only falls back to a crop when no full-frame variant exists.
 
 Delivery accepts the named presets (`sm` through `hero`) plus any transform that already exists. A preset that is not ready returns `202` with `X-Fallback-Url` and `Retry-After: 2`; the Worker serves the closest ready variant with `no-store`, and the next request after generation is a `302` to the immutable object. Anything outside the catalog returns `404` and never enqueues work.
 
