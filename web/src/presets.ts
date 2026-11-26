@@ -10,6 +10,7 @@ export type RatioPreset = {
   height: number;
   ratio: string;
   label: string;
+  mode: 'crop' | 'pad';
 };
 
 /** Mirrors src/Shared/Presets.cs. Width presets preserve the original ratio. */
@@ -24,9 +25,10 @@ export const WIDTH_PRESETS: WidthPreset[] = [
 ];
 
 export const RATIO_PRESETS: RatioPreset[] = [
-  { name: 'thumb', width: 160, height: 160, ratio: '1:1', label: 'Thumbnail' },
-  { name: 'card', width: 480, height: 320, ratio: '3:2', label: 'Card' },
-  { name: 'hero', width: 1920, height: 1080, ratio: '16:9', label: 'Hero' },
+  { name: 'thumb', width: 160, height: 160, ratio: '1:1', label: 'Thumbnail', mode: 'crop' },
+  { name: 'card', width: 480, height: 320, ratio: '3:2', label: 'Card', mode: 'crop' },
+  { name: 'hero', width: 1920, height: 1080, ratio: '16:9', label: 'Hero', mode: 'crop' },
+  { name: 'poster', width: 1280, height: 720, ratio: '16:9', label: 'Poster, padded', mode: 'pad' },
 ];
 
 export function presetUrl(imageBase: string, publicId: string, name: string): string {

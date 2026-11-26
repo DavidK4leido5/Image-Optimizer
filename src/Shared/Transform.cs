@@ -13,11 +13,13 @@ public sealed record Transform(int? W, int? H, string C, string F, int Q, string
         "w_1600,c_fit,f_webp,q_82",
     ];
 
-    static readonly string[] Gravities =
+    public static readonly string[] Gravities =
     [
         "center", "north", "south", "east", "west",
         "northeast", "northwest", "southeast", "southwest",
     ];
+
+    public static bool IsGravity(string value) => Gravities.Contains(value);
 
     public static Transform Parse(string raw)
     {

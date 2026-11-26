@@ -189,6 +189,18 @@ app.MapGet("/i/{publicId}/{spec}", async (string publicId, string spec, HttpCont
     if (preset is not null)
     {
         transform = preset.Transform;
+
+        // Gravity is a closed enum, so it can vary without opening the size catalog.
+        var gravity = http.Request.Query["g"].ToString();
+        if (gravity.Length > 0)
+        {
+            if (!Transform.IsGravity(gravity))
+                return Results.BadRequest(new { error = "g must be center, north, south, east, west or a corner" });
+            if (transform.C != "fill")
+                return Results.BadRequest(new { error = "g is only valid on fill presets" });
+            transform = transform with { G = gravity };
+        }
+
         if (extension is not null && !string.Equals(extension, transform.Extension, StringComparison.OrdinalIgnoreCase))
             return Results.NotFound();
     }

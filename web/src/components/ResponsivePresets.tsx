@@ -61,7 +61,7 @@ export function ResponsivePresets({ publicId, imageBase, onCopy }: Props) {
           >
             <span className="preset__name">{preset.name}</span>
             <span className="preset__meta">
-              {preset.width}×{preset.height} · {preset.ratio} · cropped
+              {preset.width}×{preset.height} · {preset.ratio} · {preset.mode === 'pad' ? 'padded' : 'cropped'}
             </span>
           </a>
         ))}

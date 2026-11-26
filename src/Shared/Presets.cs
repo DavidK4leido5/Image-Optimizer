@@ -20,6 +20,7 @@ public static class Presets
         new("thumb", new Transform(160, 160, "fill", "webp", 80)),
         new("card",  new Transform(480, 320, "fill", "webp", 80)),
         new("hero",  new Transform(1920, 1080, "fill", "webp", 82)),
+        new("poster", new Transform(1280, 720, "pad", "webp", 80)),
     ];
 
     private static readonly Dictionary<string, Preset> Map =
