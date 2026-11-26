@@ -13,7 +13,7 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 var cfg = AppConfig.FromEnvironment();
 var db = Db.Create(cfg.DatabaseUrl);
 var store = new BlobStore(StorageOptions.FromEnvironment());
-var wakeHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
+var wakeHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(25) };
 var grafanaHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
 
 var app = builder.Build();
@@ -362,17 +362,27 @@ static AssetDto MapAsset(NpgsqlDataReader r)
 
 static void Wake(AppConfig cfg, HttpClient http, ILogger logger)
 {
+    // Render cold starts outlive a short request, so retry a few times in the
+    // background. The upload response never waits for this.
     _ = Task.Run(async () =>
     {
-        try
+        for (var attempt = 1; attempt <= 3; attempt++)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{cfg.ProcessorUrl.TrimEnd('/')}/wake");
-            request.Headers.Add("X-Internal-Key", cfg.InternalKey);
-            using var response = await http.SendAsync(request);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "could not wake processor");
+            try
+            {
+                using var request = new HttpRequestMessage(
+                    HttpMethod.Post, $"{cfg.ProcessorUrl.TrimEnd('/')}/wake");
+                request.Headers.Add("X-Internal-Key", cfg.InternalKey);
+                using var response = await http.SendAsync(request);
+                if (response.IsSuccessStatusCode) return;
+                logger.LogWarning("wake returned {Status} (attempt {Attempt})", (int)response.StatusCode, attempt);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "could not wake processor (attempt {Attempt})", attempt);
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(10));
         }
     });
 }
