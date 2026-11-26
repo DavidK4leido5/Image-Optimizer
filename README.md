@@ -207,7 +207,7 @@ curl -s http://localhost:5080/v1/assets -H 'X-Api-Key: dev-local-key'
 curl -s -X DELETE http://localhost:5080/v1/assets/<publicId> -H 'X-Api-Key: dev-local-key'
 ```
 
-Transforms are Cloudinary-flavoured: `w_400,h_300,c_fill,g_north,f_webp,q_80`. Keys are `w`, `h`, `c` (`fit`, `fill`, `pad`), `g` (crop anchor for fill: `center` by default, plus `north`, `south`, `east`, `west`, and the four corners), `f` (`webp`, `jpeg`, `png`), `q`. Order does not matter; the canonical form is the cache identity.
+Transforms are Cloudinary-flavoured: `w_400,h_300,c_fill,g_north,u_1,f_webp,q_80`. Keys are `w`, `h`, `c` (`fit`, `fill`, `pad`), `g` (crop anchor for fill: `center` by default, plus `north`, `south`, `east`, `west`, and the four corners), `u` (`1` allows upscaling, `0` or absent never upscales), `f` (`webp`, `jpeg`, `png`), `q`. Order does not matter; the canonical form is the cache identity.
 
 The cheap version of Cloudinary's crop semantics, no saliency or face detection:
 
@@ -216,6 +216,8 @@ The cheap version of Cloudinary's crop semantics, no saliency or face detection:
 - `c_pad` fits the frame inside the box and letterboxes the rest in white.
 
 Width presets use `fit`. `thumb`, `card`, and `hero` use `fill` with center gravity, so they are cropped by definition. `poster` uses `pad`, so it keeps the whole frame with white bars. Gravity can vary per request without opening the size catalog: `/i/<publicId>/card.webp?g=north` generates the same 480x320 box anchored to the top. The console previews the largest fit variant and only falls back to a crop when no full-frame variant exists.
+
+By default the service never upscales. `?u=1` opts in for one request: `/i/<publicId>/card.webp?u=1` produces a real 480x320 from a 200px source, and the variant is stored under `u_1`, so older no-upscale variants keep their meaning and their cache entries. This is plain Mitchell resampling, not AI super-resolution. It makes the existing pixels larger, it cannot invent detail, and it is not sharpened.
 
 Delivery accepts the named presets (`sm` through `hero`) plus any transform that already exists. A preset that is not ready returns `202` with `X-Fallback-Url` and `Retry-After: 2`; the Worker serves the closest ready variant with `no-store`, and the next request after generation is a `302` to the immutable object. Anything outside the catalog returns `404` and never enqueues work.
 

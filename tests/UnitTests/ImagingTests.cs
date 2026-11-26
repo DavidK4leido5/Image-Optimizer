@@ -78,6 +78,29 @@ public class ImagingTests
     }
 
     [Fact]
+    public void Upscale_flag_allows_larger_outputs()
+    {
+        Assert.Equal((200, 133), Imaging.TargetSize(200, 400, Transform.Parse("w_480,h_320,c_fill")));
+        Assert.Equal((480, 320), Imaging.TargetSize(200, 400, Transform.Parse("w_480,h_320,c_fill,u_1")));
+        Assert.Equal((200, 400), Imaging.TargetSize(200, 400, Transform.Parse("w_320,c_fit")));
+        Assert.Equal((320, 640), Imaging.TargetSize(200, 400, Transform.Parse("w_320,c_fit,u_1")));
+    }
+
+    [Fact]
+    public void Pad_upscales_when_asked()
+    {
+        using var source = new SKBitmap(4, 2);
+        using (var canvas = new SKCanvas(source)) canvas.Clear(SKColors.Red);
+
+        var plain = SKBitmap.Decode(Imaging.Render(source, Transform.Parse("w_8,h_8,c_pad,f_png")));
+        var upscaled = SKBitmap.Decode(Imaging.Render(source, Transform.Parse("w_8,h_8,c_pad,u_1,f_png")));
+
+        Assert.Equal(SKColors.White, plain.GetPixel(4, 2));
+        Assert.Equal(SKColors.Red, upscaled.GetPixel(4, 2));
+        Assert.Equal(SKColors.White, upscaled.GetPixel(0, 0));
+    }
+
+    [Fact]
     public void Pad_letterboxes_with_white()
     {
         using var source = new SKBitmap(4, 2);

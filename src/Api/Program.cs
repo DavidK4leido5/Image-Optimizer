@@ -201,6 +201,14 @@ app.MapGet("/i/{publicId}/{spec}", async (string publicId, string spec, HttpCont
             transform = transform with { G = gravity };
         }
 
+        var upscale = http.Request.Query["u"].ToString();
+        if (upscale.Length > 0)
+        {
+            if (upscale is not ("0" or "1"))
+                return Results.BadRequest(new { error = "u must be 0 or 1" });
+            if (upscale == "1") transform = transform with { U = true };
+        }
+
         if (extension is not null && !string.Equals(extension, transform.Extension, StringComparison.OrdinalIgnoreCase))
             return Results.NotFound();
     }

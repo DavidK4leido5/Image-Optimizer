@@ -4,7 +4,7 @@ using System.Text;
 namespace CloudinaryClone.Shared;
 
 /// <summary>Canonical transform spec, Cloudinary-style: w_400,h_300,c_fill,g_north,f_webp,q_80.</summary>
-public sealed record Transform(int? W, int? H, string C, string F, int Q, string G = "center")
+public sealed record Transform(int? W, int? H, string C, string F, int Q, string G = "center", bool U = false)
 {
     public static readonly string[] Defaults =
     [
@@ -29,6 +29,7 @@ public sealed record Transform(int? W, int? H, string C, string F, int Q, string
         var c = "fit";
         var f = "webp";
         var g = "center";
+        var u = false;
 
         foreach (var part in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
@@ -50,6 +51,11 @@ public sealed record Transform(int? W, int? H, string C, string F, int Q, string
                         throw new FormatException("g must be center, north, south, east, west or a corner");
                     g = kv[1];
                     break;
+                case "u":
+                    if (kv[1] is not ("0" or "1"))
+                        throw new FormatException("u must be 0 or 1");
+                    u = kv[1] == "1";
+                    break;
                 case "f":
                     if (kv[1] is not ("webp" or "jpeg" or "png"))
                         throw new FormatException("f must be webp, jpeg or png");
@@ -63,7 +69,7 @@ public sealed record Transform(int? W, int? H, string C, string F, int Q, string
         if (w is null && h is null) throw new FormatException("w or h is required");
         if (g != "center" && c != "fill") throw new FormatException("g requires c_fill");
         if (c == "pad" && (w is null || h is null)) throw new FormatException("c_pad requires both w and h");
-        return new Transform(w, h, c, f, q ?? 80, g);
+        return new Transform(w, h, c, f, q ?? 80, g, u);
     }
 
     /// <summary>Fixed parameter order, defaults filled in. This string is the cache identity.</summary>
@@ -83,6 +89,7 @@ public sealed record Transform(int? W, int? H, string C, string F, int Q, string
             Add("h", H);
             Add("c", C);
             Add("g", G == "center" ? null : G);
+            Add("u", U ? 1 : null);
             Add("f", F);
             Add("q", Q);
             return sb.ToString();

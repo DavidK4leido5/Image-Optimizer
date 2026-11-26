@@ -15,29 +15,33 @@ public static class Imaging
 
             if (t.C == "fill")
             {
-                // Shrink the target box, keeping its ratio, when the source is smaller.
+                // Without u_1, shrink the target box to the source instead of upscaling.
+                if (t.U) return (w, h);
                 var ratio = Math.Min(1d, Math.Min(sourceWidth / (double)w, sourceHeight / (double)h));
                 return (Math.Max(1, (int)Math.Round(w * ratio)), Math.Max(1, (int)Math.Round(h * ratio)));
             }
 
-            var scale = Math.Min(1d, Math.Min(w / (double)sourceWidth, h / (double)sourceHeight));
+            var limit = t.U ? double.MaxValue : 1d;
+            var scale = Math.Min(limit, Math.Min(w / (double)sourceWidth, h / (double)sourceHeight));
             return (Math.Max(1, (int)Math.Round(sourceWidth * scale)), Math.Max(1, (int)Math.Round(sourceHeight * scale)));
         }
 
         if (t.W is int onlyWidth)
         {
-            var width = Math.Min(onlyWidth, sourceWidth);
+            var width = t.U ? onlyWidth : Math.Min(onlyWidth, sourceWidth);
             var height = Math.Max(1, (int)Math.Round(sourceHeight * (width / (double)sourceWidth)));
             return (width, height);
         }
 
-        var heightOnly = Math.Min(t.H!.Value, sourceHeight);
+        var heightOnly = t.U ? t.H!.Value : Math.Min(t.H!.Value, sourceHeight);
         return (Math.Max(1, (int)Math.Round(sourceWidth * (heightOnly / (double)sourceHeight))), heightOnly);
     }
 
-    static (int Width, int Height) FitInside(int sourceWidth, int sourceHeight, int boxWidth, int boxHeight)
+    static (int Width, int Height) FitInside(int sourceWidth, int sourceHeight, int boxWidth, int boxHeight,
+        bool upscale)
     {
-        var scale = Math.Min(1d, Math.Min(boxWidth / (double)sourceWidth, boxHeight / (double)sourceHeight));
+        var scale = Math.Min(boxWidth / (double)sourceWidth, boxHeight / (double)sourceHeight);
+        if (!upscale) scale = Math.Min(1d, scale);
         return (Math.Max(1, (int)Math.Round(sourceWidth * scale)), Math.Max(1, (int)Math.Round(sourceHeight * scale)));
     }
 
@@ -84,7 +88,7 @@ public static class Imaging
 
             if (t.C == "pad")
             {
-                var (innerWidth, innerHeight) = FitInside(source.Width, source.Height, width, height);
+                var (innerWidth, innerHeight) = FitInside(source.Width, source.Height, width, height, t.U);
                 var left = (width - innerWidth) / 2f;
                 var top = (height - innerHeight) / 2f;
                 canvas.DrawBitmap(source, new SKRect(0, 0, source.Width, source.Height),
