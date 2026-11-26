@@ -24,8 +24,8 @@ export function ResponsivePresets({ publicId, imageBase, onCopy }: Props) {
         <div>
           <h3 id={'presets-' + publicId}>Responsive presets</h3>
           <p className="muted">
-            Width presets keep the full frame. Ratio presets crop to their box. Generated on first request,
-            then cached at the CDN.
+            Width presets keep the full frame. Ratio presets crop or pad to their box. Generated on first
+            request, then cached at the CDN.
           </p>
         </div>
         <button type="button" className="drawer__copy" onClick={() => onCopy(snippet, 'srcset copied')}>

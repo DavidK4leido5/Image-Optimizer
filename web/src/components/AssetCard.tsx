@@ -21,9 +21,21 @@ export function AssetCard({ asset, imageBase, onOpen }: Props) {
   const fallback = ordered.find((variant) => variant.transform.includes('c_fit')) ?? smallest;
   const src = fallback ? encodeUrl(imageBase + fallback.url) : '';
   // Only fit variants: ratio crops would change framing between breakpoints.
+  // The descriptor is the real width, not the requested one, because a small
+  // source is never upscaled and an 800w URL may actually be 200px wide.
+  const seen = new Set<number>();
   const srcSet = ordered
-    .filter((variant) => variant.transform.includes('c_fit') && widthOf(variant.transform) > 0)
-    .map((variant) => encodeUrl(imageBase + variant.url) + ' ' + widthOf(variant.transform) + 'w')
+    .filter((variant) => variant.transform.includes('c_fit'))
+    .map((variant) => ({
+      variant,
+      width: asset.width ? Math.min(widthOf(variant.transform), asset.width) : widthOf(variant.transform),
+    }))
+    .filter(({ width }) => {
+      if (width <= 0 || seen.has(width)) return false;
+      seen.add(width);
+      return true;
+    })
+    .map(({ variant, width }) => encodeUrl(imageBase + variant.url) + ' ' + width + 'w')
     .join(', ');
   const dimensions = asset.width && asset.height ? asset.width + ' × ' + asset.height : '—';
   const label =
